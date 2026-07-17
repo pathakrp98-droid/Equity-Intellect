@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Portfolio Intelligence"
+version = "1.0.0"
+id = "artifacts/portfolio-intelligence"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24637
+
+[services.development]
+run = "pnpm --filter @workspace/portfolio-intelligence run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/portfolio-intelligence", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/portfolio-intelligence/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24637"
+BASE_PATH = "/"

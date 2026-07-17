@@ -3,20 +3,32 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Portfolio Intelligence API for Indian equity investors
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: portfolio
+    description: Portfolio and holdings
+  - name: research
+    description: Research terminal
+  - name: market
+    description: Market intelligence
+  - name: alerts
+    description: Alerts and notifications
+  - name: copilot
+    description: AI Copilot
+  - name: settings
+    description: Settings and import
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +36,614 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── CIO Dashboard ──────────────────────────────────────────────────────────
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [portfolio]
+      summary: CIO dashboard summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/alerts:
+    get:
+      operationId: getDashboardAlerts
+      tags: [alerts]
+      summary: Urgent thesis-breaking alerts
+      responses:
+        "200":
+          description: List of urgent alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThesisAlert"
+
+  /dashboard/overnight-markets:
+    get:
+      operationId: getOvernightMarkets
+      tags: [market]
+      summary: Overnight global markets snapshot
+      responses:
+        "200":
+          description: Overnight markets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MarketIndex"
+
+  /dashboard/india-macro:
+    get:
+      operationId: getIndiaMacro
+      tags: [market]
+      summary: India macro indicators
+      responses:
+        "200":
+          description: India macro data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MacroIndicator"
+
+  /dashboard/top-actions:
+    get:
+      operationId: getTopActions
+      tags: [portfolio]
+      summary: Top recommended actions for today
+      responses:
+        "200":
+          description: Top actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActionItem"
+
+  /dashboard/catalysts:
+    get:
+      operationId: getUpcomingCatalysts
+      tags: [portfolio]
+      summary: Upcoming catalysts for portfolio holdings
+      responses:
+        "200":
+          description: Upcoming catalysts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Catalyst"
+
+  # ── Portfolio Manager ───────────────────────────────────────────────────────
+  /portfolio/holdings:
+    get:
+      operationId: getHoldings
+      tags: [portfolio]
+      summary: Portfolio holdings
+      responses:
+        "200":
+          description: Holdings list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Holding"
+
+  /portfolio/watchlist:
+    get:
+      operationId: getWatchlist
+      tags: [portfolio]
+      summary: Watchlist items
+      responses:
+        "200":
+          description: Watchlist
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchlistItem"
+    post:
+      operationId: addToWatchlist
+      tags: [portfolio]
+      summary: Add stock to watchlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WatchlistInput"
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchlistItem"
+
+  /portfolio/watchlist/{ticker}:
+    delete:
+      operationId: removeFromWatchlist
+      tags: [portfolio]
+      summary: Remove from watchlist
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Removed
+
+  /portfolio/performance:
+    get:
+      operationId: getPerformance
+      tags: [portfolio]
+      summary: Portfolio performance attribution
+      responses:
+        "200":
+          description: Performance data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerformanceSummary"
+
+  /portfolio/risk:
+    get:
+      operationId: getRiskDashboard
+      tags: [portfolio]
+      summary: Risk metrics, concentration, and stress tests
+      responses:
+        "200":
+          description: Risk dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskDashboard"
+
+  /portfolio/broker-snapshots:
+    get:
+      operationId: getBrokerSnapshots
+      tags: [portfolio]
+      summary: Broker account snapshots
+      responses:
+        "200":
+          description: Broker snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BrokerSnapshot"
+
+  /portfolio/recommendation-history:
+    get:
+      operationId: getRecommendationHistory
+      tags: [portfolio]
+      summary: Historical buy/sell recommendations
+      responses:
+        "200":
+          description: Recommendation history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Recommendation"
+
+  /portfolio/position-sizing:
+    get:
+      operationId: getPositionSizing
+      tags: [portfolio]
+      summary: Position sizing and ideal weights
+      responses:
+        "200":
+          description: Position sizing data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PositionSizing"
+
+  # ── Research Terminal ───────────────────────────────────────────────────────
+  /research/companies:
+    get:
+      operationId: getResearchCompanies
+      tags: [research]
+      summary: List covered companies
+      responses:
+        "200":
+          description: Companies list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanySummary"
+
+  /research/companies/{ticker}:
+    get:
+      operationId: getCompanyDetail
+      tags: [research]
+      summary: Full company research detail
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Company detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /research/decision-journal:
+    get:
+      operationId: getDecisionJournal
+      tags: [research]
+      summary: Investment decision journal entries
+      responses:
+        "200":
+          description: Journal entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JournalEntry"
+    post:
+      operationId: addJournalEntry
+      tags: [research]
+      summary: Add journal entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+
+  # ── Market Intelligence ─────────────────────────────────────────────────────
+  /market/scanner:
+    get:
+      operationId: getVolumeScanner
+      tags: [market]
+      summary: Volume and delivery scanner
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [volume, delivery, unusual]
+      responses:
+        "200":
+          description: Scanner results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScannerResult"
+
+  /market/promoter-activity:
+    get:
+      operationId: getPromoterActivity
+      tags: [market]
+      summary: Promoter and insider shareholding changes
+      responses:
+        "200":
+          description: Promoter activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PromoterActivity"
+
+  /market/bulk-block-deals:
+    get:
+      operationId: getBulkBlockDeals
+      tags: [market]
+      summary: Recent bulk and block deals
+      responses:
+        "200":
+          description: Bulk and block deals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BulkBlockDeal"
+
+  /market/fno-positioning:
+    get:
+      operationId: getFnoPositioning
+      tags: [market]
+      summary: F&O OI, PCR, and positioning data
+      responses:
+        "200":
+          description: F&O data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FnoData"
+
+  /market/sector-rotation:
+    get:
+      operationId: getSectorRotation
+      tags: [market]
+      summary: Sector rotation heatmap and flows
+      responses:
+        "200":
+          description: Sector rotation data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SectorData"
+
+  /market/earnings-calendar:
+    get:
+      operationId: getEarningsCalendar
+      tags: [market]
+      summary: Upcoming earnings announcements
+      responses:
+        "200":
+          description: Earnings calendar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EarningsEvent"
+
+  /market/economic-calendar:
+    get:
+      operationId: getEconomicCalendar
+      tags: [market]
+      summary: Economic events calendar
+      responses:
+        "200":
+          description: Economic calendar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EconomicEvent"
+
+  /market/ipos:
+    get:
+      operationId: getIpos
+      tags: [market]
+      summary: IPO pipeline
+      responses:
+        "200":
+          description: IPO list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IpoEntry"
+
+  /market/corporate-actions:
+    get:
+      operationId: getCorporateActions
+      tags: [market]
+      summary: Corporate actions (dividends, splits, buybacks)
+      responses:
+        "200":
+          description: Corporate actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CorporateAction"
+
+  /market/brokerage-actions:
+    get:
+      operationId: getBrokerageActions
+      tags: [market]
+      summary: Recent brokerage upgrades and downgrades
+      responses:
+        "200":
+          description: Brokerage actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BrokerageAction"
+
+  /market/commodities:
+    get:
+      operationId: getCommodities
+      tags: [market]
+      summary: Key commodity prices
+      responses:
+        "200":
+          description: Commodities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CommodityPrice"
+
+  # ── Alerts ──────────────────────────────────────────────────────────────────
+  /alerts:
+    get:
+      operationId: getAlerts
+      tags: [alerts]
+      summary: All alerts
+      responses:
+        "200":
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThesisAlert"
+
+  /alerts/settings:
+    get:
+      operationId: getAlertSettings
+      tags: [alerts]
+      summary: Alert configuration settings
+      responses:
+        "200":
+          description: Alert settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertSettings"
+    put:
+      operationId: updateAlertSettings
+      tags: [alerts]
+      summary: Update alert settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertSettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertSettings"
+
+  /alerts/{id}/dismiss:
+    post:
+      operationId: dismissAlert
+      tags: [alerts]
+      summary: Dismiss an alert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThesisAlert"
+
+  # ── AI Copilot ───────────────────────────────────────────────────────────────
+  /copilot/query:
+    post:
+      operationId: queryCopilot
+      tags: [copilot]
+      summary: Ask a natural-language investment question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopilotInput"
+      responses:
+        "200":
+          description: Structured answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotResponse"
+
+  /copilot/history:
+    get:
+      operationId: getCopilotHistory
+      tags: [copilot]
+      summary: Previous copilot conversation history
+      responses:
+        "200":
+          description: History
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CopilotMessage"
+
+  # ── Settings / Import ───────────────────────────────────────────────────────
+  /settings/import/zerodha:
+    post:
+      operationId: importZerodha
+      tags: [settings]
+      summary: Import Zerodha holdings CSV
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CsvImportInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
+  /settings/import/hdfc:
+    post:
+      operationId: importHdfc
+      tags: [settings]
+      summary: Import HDFC InvestRight CSV
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CsvImportInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +651,1188 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    # ── Dashboard ──────────────────────────────────────────────────────────────
+    DashboardSummary:
+      type: object
+      required: [portfolioValue, dailyPnl, dailyPnlPct, overallPnl, overallPnlPct, cashBalance, investedValue, numberOfHoldings, convictionChanges, sectorAllocation, lastUpdated]
+      properties:
+        portfolioValue:
+          type: number
+        dailyPnl:
+          type: number
+        dailyPnlPct:
+          type: number
+        overallPnl:
+          type: number
+        overallPnlPct:
+          type: number
+        cashBalance:
+          type: number
+        investedValue:
+          type: number
+        numberOfHoldings:
+          type: integer
+        convictionChanges:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConvictionChange"
+        sectorAllocation:
+          type: array
+          items:
+            $ref: "#/components/schemas/SectorAllocation"
+        lastUpdated:
+          type: string
+
+    ConvictionChange:
+      type: object
+      required: [ticker, name, previousConviction, newConviction, reason, changedAt]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        previousConviction:
+          type: string
+          enum: [high, medium, low]
+        newConviction:
+          type: string
+          enum: [high, medium, low]
+        reason:
+          type: string
+        changedAt:
+          type: string
+
+    SectorAllocation:
+      type: object
+      required: [sector, allocationPct, value]
+      properties:
+        sector:
+          type: string
+        allocationPct:
+          type: number
+        value:
+          type: number
+
+    MarketIndex:
+      type: object
+      required: [name, value, change, changePct, region, asOf]
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+        change:
+          type: number
+        changePct:
+          type: number
+        region:
+          type: string
+        asOf:
+          type: string
+
+    MacroIndicator:
+      type: object
+      required: [name, value, unit, trend, asOf]
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+        unit:
+          type: string
+        trend:
+          type: string
+          enum: [up, down, flat]
+        previousValue:
+          type: ["number", "null"]
+        asOf:
+          type: string
+
+    ActionItem:
+      type: object
+      required: [id, ticker, name, action, rationale, priority, source]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell, trim, add, hold, review]
+        rationale:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        source:
+          type: string
+        suggestedPrice:
+          type: ["number", "null"]
+
+    Catalyst:
+      type: object
+      required: [id, ticker, name, event, date, impact, probability]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        event:
+          type: string
+        date:
+          type: string
+        impact:
+          type: string
+          enum: [high, medium, low]
+        probability:
+          type: string
+          enum: [high, medium, low]
+        notes:
+          type: ["string", "null"]
+
+    # ── Holdings ───────────────────────────────────────────────────────────────
+    Holding:
+      type: object
+      required: [ticker, name, sector, quantity, avgBuyPrice, ltp, currentValue, investedValue, pnl, pnlPct, dayChange, dayChangePct, allocationPct, conviction, thesisStatus, entryDate]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        quantity:
+          type: number
+        avgBuyPrice:
+          type: number
+        ltp:
+          type: number
+        currentValue:
+          type: number
+        investedValue:
+          type: number
+        pnl:
+          type: number
+        pnlPct:
+          type: number
+        dayChange:
+          type: number
+        dayChangePct:
+          type: number
+        allocationPct:
+          type: number
+        conviction:
+          type: string
+          enum: [high, medium, low]
+        thesisStatus:
+          type: string
+          enum: [intact, weakening, broken, monitoring]
+        entryDate:
+          type: string
+        targetPrice:
+          type: ["number", "null"]
+        stopLoss:
+          type: ["number", "null"]
+        idealWeight:
+          type: ["number", "null"]
+        broker:
+          type: ["string", "null"]
+        hasAlert:
+          type: boolean
+
+    WatchlistItem:
+      type: object
+      required: [id, ticker, name, sector, ltp, dayChange, dayChangePct, watchedSince, conviction, notes]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        ltp:
+          type: number
+        dayChange:
+          type: number
+        dayChangePct:
+          type: number
+        watchedSince:
+          type: string
+        conviction:
+          type: string
+          enum: [high, medium, low]
+        notes:
+          type: string
+        targetEntryPrice:
+          type: ["number", "null"]
+        pe:
+          type: ["number", "null"]
+        marketCap:
+          type: ["number", "null"]
+
+    WatchlistInput:
+      type: object
+      required: [ticker, name, sector, conviction, notes]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        conviction:
+          type: string
+          enum: [high, medium, low]
+        notes:
+          type: string
+        targetEntryPrice:
+          type: ["number", "null"]
+
+    PerformanceSummary:
+      type: object
+      required: [absoluteReturn, xirr, niftyReturn, alpha, beta, sharpeRatio, maxDrawdown, attributions, monthlyReturns]
+      properties:
+        absoluteReturn:
+          type: number
+        xirr:
+          type: number
+        niftyReturn:
+          type: number
+        alpha:
+          type: number
+        beta:
+          type: number
+        sharpeRatio:
+          type: number
+        maxDrawdown:
+          type: number
+        attributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attribution"
+        monthlyReturns:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyReturn"
+
+    Attribution:
+      type: object
+      required: [ticker, name, contribution, allocationEffect, selectionEffect]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        contribution:
+          type: number
+        allocationEffect:
+          type: number
+        selectionEffect:
+          type: number
+
+    MonthlyReturn:
+      type: object
+      required: [month, portfolioReturn, benchmarkReturn]
+      properties:
+        month:
+          type: string
+        portfolioReturn:
+          type: number
+        benchmarkReturn:
+          type: number
+
+    RiskDashboard:
+      type: object
+      required: [concentrationRisk, topHoldingsConcentration, sectorConcentration, correlationMatrix, stressTests, var95, var99]
+      properties:
+        concentrationRisk:
+          type: string
+          enum: [low, medium, high]
+        topHoldingsConcentration:
+          type: number
+        sectorConcentration:
+          type: array
+          items:
+            $ref: "#/components/schemas/SectorConcentration"
+        correlationMatrix:
+          type: array
+          items:
+            $ref: "#/components/schemas/CorrelationPair"
+        stressTests:
+          type: array
+          items:
+            $ref: "#/components/schemas/StressTest"
+        var95:
+          type: number
+        var99:
+          type: number
+
+    SectorConcentration:
+      type: object
+      required: [sector, weight, herfindahlIndex]
+      properties:
+        sector:
+          type: string
+        weight:
+          type: number
+        herfindahlIndex:
+          type: number
+
+    CorrelationPair:
+      type: object
+      required: [ticker1, ticker2, correlation]
+      properties:
+        ticker1:
+          type: string
+        ticker2:
+          type: string
+        correlation:
+          type: number
+
+    StressTest:
+      type: object
+      required: [scenario, portfolioImpactPct, description]
+      properties:
+        scenario:
+          type: string
+        portfolioImpactPct:
+          type: number
+        description:
+          type: string
+
+    BrokerSnapshot:
+      type: object
+      required: [broker, accountId, totalValue, cashBalance, holdingsCount, lastSynced, status]
+      properties:
+        broker:
+          type: string
+        accountId:
+          type: string
+        totalValue:
+          type: number
+        cashBalance:
+          type: number
+        holdingsCount:
+          type: integer
+        lastSynced:
+          type: string
+        status:
+          type: string
+          enum: [synced, stale, error]
+        discrepancies:
+          type: integer
+
+    Recommendation:
+      type: object
+      required: [id, ticker, name, action, date, price, rationale, outcome, convictionAtTime]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell, trim, add, hold]
+        date:
+          type: string
+        price:
+          type: number
+        rationale:
+          type: string
+        outcome:
+          type: string
+          enum: [pending, successful, unsuccessful, partial]
+        convictionAtTime:
+          type: string
+          enum: [high, medium, low]
+        returnSinceRecommendation:
+          type: ["number", "null"]
+
+    PositionSizing:
+      type: object
+      required: [ticker, name, currentWeight, idealWeight, currentValue, suggestedAction, stagedEntryLevels, trimLevels]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        currentWeight:
+          type: number
+        idealWeight:
+          type: number
+        currentValue:
+          type: number
+        suggestedAction:
+          type: string
+          enum: [add, trim, hold, exit]
+        stagedEntryLevels:
+          type: array
+          items:
+            $ref: "#/components/schemas/PriceLevel"
+        trimLevels:
+          type: array
+          items:
+            $ref: "#/components/schemas/PriceLevel"
+
+    PriceLevel:
+      type: object
+      required: [price, quantityPct, notes]
+      properties:
+        price:
+          type: number
+        quantityPct:
+          type: number
+        notes:
+          type: string
+
+    # ── Research ───────────────────────────────────────────────────────────────
+    CompanySummary:
+      type: object
+      required: [ticker, name, sector, marketCap, ltp, dayChangePct, pe, conviction, thesisStatus, analystCoverage, lastUpdated]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        marketCap:
+          type: number
+        ltp:
+          type: number
+        dayChangePct:
+          type: number
+        pe:
+          type: ["number", "null"]
+        conviction:
+          type: string
+          enum: [high, medium, low]
+        thesisStatus:
+          type: string
+          enum: [intact, weakening, broken, monitoring]
+        analystCoverage:
+          type: string
+        lastUpdated:
+          type: string
+
+    CompanyDetail:
+      type: object
+      required: [ticker, name, sector, marketCap, ltp, thesis, valuation, financialTrends, technicals, managementCommentary, catalysts, invalidationTriggers, earningsQualityFlags, lastUpdated]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        marketCap:
+          type: number
+        ltp:
+          type: number
+        thesis:
+          $ref: "#/components/schemas/Thesis"
+        valuation:
+          $ref: "#/components/schemas/ValuationCases"
+        financialTrends:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinancialTrend"
+        technicals:
+          $ref: "#/components/schemas/Technicals"
+        managementCommentary:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManagementComment"
+        catalysts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Catalyst"
+        invalidationTriggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvalidationTrigger"
+        earningsQualityFlags:
+          type: array
+          items:
+            $ref: "#/components/schemas/EarningsQualityFlag"
+        lastUpdated:
+          type: string
+
+    Thesis:
+      type: object
+      required: [summary, bullCase, baseCase, bearCase, conviction, keyAssumptions, moatRating, managementRating, updatedAt]
+      properties:
+        summary:
+          type: string
+        bullCase:
+          type: string
+        baseCase:
+          type: string
+        bearCase:
+          type: string
+        conviction:
+          type: string
+          enum: [high, medium, low]
+        keyAssumptions:
+          type: array
+          items:
+            type: string
+        moatRating:
+          type: string
+          enum: [wide, narrow, none]
+        managementRating:
+          type: string
+          enum: [excellent, good, average, poor]
+        updatedAt:
+          type: string
+
+    ValuationCases:
+      type: object
+      required: [bull, base, bear, currentPrice, upside, methodology]
+      properties:
+        bull:
+          type: number
+        base:
+          type: number
+        bear:
+          type: number
+        currentPrice:
+          type: number
+        upside:
+          type: number
+        methodology:
+          type: string
+
+    FinancialTrend:
+      type: object
+      required: [metric, periods, values, trend]
+      properties:
+        metric:
+          type: string
+        periods:
+          type: array
+          items:
+            type: string
+        values:
+          type: array
+          items:
+            type: number
+        trend:
+          type: string
+          enum: [improving, stable, deteriorating]
+        unit:
+          type: string
+
+    Technicals:
+      type: object
+      required: [rsi14, ema50, ema200, support, resistance, macdSignal, volumeVsAvg20d, trend]
+      properties:
+        rsi14:
+          type: number
+        ema50:
+          type: number
+        ema200:
+          type: number
+        support:
+          type: number
+        resistance:
+          type: number
+        macdSignal:
+          type: string
+          enum: [bullish, bearish, neutral]
+        volumeVsAvg20d:
+          type: number
+        trend:
+          type: string
+          enum: [uptrend, downtrend, sideways]
+
+    ManagementComment:
+      type: object
+      required: [id, quarter, date, speaker, comment, sentiment, tags]
+      properties:
+        id:
+          type: string
+        quarter:
+          type: string
+        date:
+          type: string
+        speaker:
+          type: string
+        comment:
+          type: string
+        sentiment:
+          type: string
+          enum: [positive, neutral, negative, concerning]
+        tags:
+          type: array
+          items:
+            type: string
+
+    InvalidationTrigger:
+      type: object
+      required: [id, trigger, severity, description]
+      properties:
+        id:
+          type: string
+        trigger:
+          type: string
+        severity:
+          type: string
+          enum: [critical, high, medium]
+        description:
+          type: string
+        triggered:
+          type: boolean
+
+    EarningsQualityFlag:
+      type: object
+      required: [id, flag, severity, description, detected]
+      properties:
+        id:
+          type: string
+        flag:
+          type: string
+        severity:
+          type: string
+          enum: [red, amber, green]
+        description:
+          type: string
+        detected:
+          type: boolean
+
+    JournalEntry:
+      type: object
+      required: [id, ticker, name, action, date, price, rationale, emotionalState, keyFactors, revisitDate]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell, hold, review]
+        date:
+          type: string
+        price:
+          type: number
+        rationale:
+          type: string
+        emotionalState:
+          type: string
+          enum: [confident, anxious, uncertain, greedy, fearful, neutral]
+        keyFactors:
+          type: array
+          items:
+            type: string
+        revisitDate:
+          type: string
+        outcome:
+          type: ["string", "null"]
+
+    JournalEntryInput:
+      type: object
+      required: [ticker, name, action, date, price, rationale, emotionalState, keyFactors, revisitDate]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell, hold, review]
+        date:
+          type: string
+        price:
+          type: number
+        rationale:
+          type: string
+        emotionalState:
+          type: string
+          enum: [confident, anxious, uncertain, greedy, fearful, neutral]
+        keyFactors:
+          type: array
+          items:
+            type: string
+        revisitDate:
+          type: string
+
+    # ── Market ─────────────────────────────────────────────────────────────────
+    ScannerResult:
+      type: object
+      required: [ticker, name, sector, ltp, volumeRatio, deliveryPct, oi, dayChangePct, signal, timestamp]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        ltp:
+          type: number
+        volumeRatio:
+          type: number
+        deliveryPct:
+          type: number
+        oi:
+          type: ["number", "null"]
+        dayChangePct:
+          type: number
+        signal:
+          type: string
+          enum: [accumulation, distribution, unusual_volume, delivery_surge, normal]
+        timestamp:
+          type: string
+
+    PromoterActivity:
+      type: object
+      required: [id, ticker, name, quarter, promoterHoldingPct, changeInHolding, pledgedPct, pledgeChange, category, filingDate, remarks]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        quarter:
+          type: string
+        promoterHoldingPct:
+          type: number
+        changeInHolding:
+          type: number
+        pledgedPct:
+          type: number
+        pledgeChange:
+          type: number
+        category:
+          type: string
+          enum: [promoter_buying, promoter_selling, pledge_increase, pledge_decrease, unchanged]
+        filingDate:
+          type: string
+        remarks:
+          type: string
+
+    BulkBlockDeal:
+      type: object
+      required: [id, ticker, name, date, type, client, quantity, price, value, side, exchange]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        date:
+          type: string
+        type:
+          type: string
+          enum: [bulk, block]
+        client:
+          type: string
+        quantity:
+          type: number
+        price:
+          type: number
+        value:
+          type: number
+        side:
+          type: string
+          enum: [buy, sell]
+        exchange:
+          type: string
+
+    FnoData:
+      type: object
+      required: [ticker, name, openInterest, oiChange, oiChangePct, pcr, ivPercentile, maxPainStrike, keyStrikes]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        openInterest:
+          type: number
+        oiChange:
+          type: number
+        oiChangePct:
+          type: number
+        pcr:
+          type: number
+        ivPercentile:
+          type: number
+        maxPainStrike:
+          type: number
+        keyStrikes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FnoStrike"
+
+    FnoStrike:
+      type: object
+      required: [strike, callOi, putOi, callOiChange, putOiChange]
+      properties:
+        strike:
+          type: number
+        callOi:
+          type: number
+        putOi:
+          type: number
+        callOiChange:
+          type: number
+        putOiChange:
+          type: number
+
+    SectorData:
+      type: object
+      required: [sector, weekReturn, monthReturn, quarterReturn, fiiFlows, diiFlows, breadth, topGainers, topLosers]
+      properties:
+        sector:
+          type: string
+        weekReturn:
+          type: number
+        monthReturn:
+          type: number
+        quarterReturn:
+          type: number
+        fiiFlows:
+          type: number
+        diiFlows:
+          type: number
+        breadth:
+          type: number
+        topGainers:
+          type: array
+          items:
+            type: string
+        topLosers:
+          type: array
+          items:
+            type: string
+
+    EarningsEvent:
+      type: object
+      required: [id, ticker, name, sector, date, quarter, estimatedEps, previousEps, marketCap, isInPortfolio]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        date:
+          type: string
+        quarter:
+          type: string
+        estimatedEps:
+          type: ["number", "null"]
+        previousEps:
+          type: ["number", "null"]
+        marketCap:
+          type: number
+        isInPortfolio:
+          type: boolean
+        revenuEst:
+          type: ["number", "null"]
+
+    EconomicEvent:
+      type: object
+      required: [id, event, date, country, impact, previous, forecast, actual]
+      properties:
+        id:
+          type: string
+        event:
+          type: string
+        date:
+          type: string
+        country:
+          type: string
+        impact:
+          type: string
+          enum: [high, medium, low]
+        previous:
+          type: ["string", "null"]
+        forecast:
+          type: ["string", "null"]
+        actual:
+          type: ["string", "null"]
+
+    IpoEntry:
+      type: object
+      required: [id, name, sector, openDate, closeDate, issuePrice, lotSize, gmpPct, subscriptionStatus, issueSizeInCr, rating]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        sector:
+          type: string
+        openDate:
+          type: string
+        closeDate:
+          type: string
+        issuePrice:
+          type: number
+        lotSize:
+          type: integer
+        gmpPct:
+          type: number
+        subscriptionStatus:
+          type: string
+          enum: [upcoming, open, closed, listed]
+        issueSizeInCr:
+          type: number
+        rating:
+          type: ["string", "null"]
+
+    CorporateAction:
+      type: object
+      required: [id, ticker, name, type, exDate, recordDate, details]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [dividend, bonus, split, rights, buyback, merger, demerger]
+        exDate:
+          type: string
+        recordDate:
+          type: string
+        details:
+          type: string
+
+    BrokerageAction:
+      type: object
+      required: [id, ticker, name, date, broker, action, targetPrice, previousTarget, analyst, rationale]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        date:
+          type: string
+        broker:
+          type: string
+        action:
+          type: string
+          enum: [upgrade, downgrade, initiate, maintain, reiterate]
+        targetPrice:
+          type: number
+        previousTarget:
+          type: ["number", "null"]
+        analyst:
+          type: string
+        rationale:
+          type: string
+
+    CommodityPrice:
+      type: object
+      required: [name, price, unit, change, changePct, asOf]
+      properties:
+        name:
+          type: string
+        price:
+          type: number
+        unit:
+          type: string
+        change:
+          type: number
+        changePct:
+          type: number
+        asOf:
+          type: string
+
+    # ── Alerts ─────────────────────────────────────────────────────────────────
+    ThesisAlert:
+      type: object
+      required: [id, ticker, name, alertType, severity, headline, detail, source, timestamp, dismissed]
+      properties:
+        id:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        alertType:
+          type: string
+          enum: [promoter_selling, pledge_increase, auditor_resignation, management_exit, rating_downgrade, regulatory_investigation, fraud_allegation, debt_issue, order_cancellation, earnings_cut, margin_deterioration, governance_issue, dilution, other]
+        severity:
+          type: string
+          enum: [critical, high, medium, low]
+        headline:
+          type: string
+        detail:
+          type: string
+        source:
+          type: string
+        timestamp:
+          type: string
+        dismissed:
+          type: boolean
+
+    AlertSettings:
+      type: object
+      required: [enabledAlertTypes, severityThreshold, emailNotifications, pushNotifications, portfolioOnly]
+      properties:
+        enabledAlertTypes:
+          type: array
+          items:
+            type: string
+        severityThreshold:
+          type: string
+          enum: [critical, high, medium, low]
+        emailNotifications:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        portfolioOnly:
+          type: boolean
+
+    AlertSettingsUpdate:
+      type: object
+      properties:
+        enabledAlertTypes:
+          type: array
+          items:
+            type: string
+        severityThreshold:
+          type: string
+          enum: [critical, high, medium, low]
+        emailNotifications:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        portfolioOnly:
+          type: boolean
+
+    # ── Copilot ───────────────────────────────────────────────────────────────
+    CopilotInput:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+        context:
+          type: ["string", "null"]
+
+    CopilotResponse:
+      type: object
+      required: [id, question, answer, sources, thesisImpact, convictionChange, recommendedActions, timestamp]
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/CopilotSource"
+        thesisImpact:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThesisImpact"
+        convictionChange:
+          type: ["string", "null"]
+        recommendedActions:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+
+    CopilotSource:
+      type: object
+      required: [title, type, url, date]
+      properties:
+        title:
+          type: string
+        type:
+          type: string
+          enum: [bse_filing, nse_data, annual_report, concall, analyst_report, news, internal]
+        url:
+          type: string
+        date:
+          type: string
+
+    ThesisImpact:
+      type: object
+      required: [ticker, name, impact, reason]
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        impact:
+          type: string
+          enum: [positive, negative, neutral]
+        reason:
+          type: string
+
+    CopilotMessage:
+      type: object
+      required: [id, role, content, timestamp]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        timestamp:
+          type: string
+        response:
+          $ref: "#/components/schemas/CopilotResponse"
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+    CsvImportInput:
+      type: object
+      required: [csvContent]
+      properties:
+        csvContent:
+          type: string
+        broker:
+          type: ["string", "null"]
+
+    ImportResult:
+      type: object
+      required: [success, imported, skipped, errors, message]
+      properties:
+        success:
+          type: boolean
+        imported:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
