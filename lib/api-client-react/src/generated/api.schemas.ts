@@ -1067,6 +1067,250 @@ export interface ImportResult {
   message: string;
 }
 
+export interface AuthUser {
+  id: string;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  firstName: string | null;
+  /** @nullable */
+  lastName: string | null;
+  /** @nullable */
+  profileImageUrl: string | null;
+}
+
+export interface AuthUserEnvelope {
+  user: AuthUser | null;
+}
+
+export interface MobileTokenExchangeRequest {
+  /** @minLength 1 */
+  code: string;
+  /** @minLength 1 */
+  code_verifier: string;
+  /** @minLength 1 */
+  redirect_uri: string;
+  /** @minLength 1 */
+  state: string;
+  /** @minLength 1 */
+  nonce?: string;
+}
+
+export interface MobileTokenExchangeSuccess {
+  token: string;
+}
+
+export const LogoutSuccessValue = {
+  success: true,
+} as const;
+export type LogoutSuccess = typeof LogoutSuccessValue;
+
+export interface ErrorEnvelope {
+  error: string;
+}
+
+export type GuardrailSettingsResponseSettings = { [key: string]: unknown };
+
+export interface GuardrailSettingsResponse {
+  settings: GuardrailSettingsResponseSettings;
+  isDefault: boolean;
+}
+
+/**
+ * Partial guardrail settings update
+ */
+export interface GuardrailSettingsPatch { [key: string]: unknown }
+
+export interface GuardrailExecuteRequest {
+  checkId: string;
+  action: string;
+  ticker: string;
+  /** @nullable */
+  name?: string | null;
+  /** @nullable */
+  overrideRationale?: string | null;
+  userConfirmed: boolean;
+}
+
+export interface GuardrailExecuteResponse {
+  success: boolean;
+  auditId?: number;
+  isOverride: boolean;
+}
+
+export type GuardrailCheckRequestAction = typeof GuardrailCheckRequestAction[keyof typeof GuardrailCheckRequestAction];
+
+
+export const GuardrailCheckRequestAction = {
+  buy: 'buy',
+  sell: 'sell',
+  add: 'add',
+  trim: 'trim',
+  exit: 'exit',
+  review: 'review',
+} as const;
+
+export interface GuardrailCheckRequest {
+  action?: GuardrailCheckRequestAction;
+  ticker?: string;
+  /** @nullable */
+  name?: string | null;
+  /** @nullable */
+  suggestedQuantity?: number | null;
+  /** @nullable */
+  suggestedPrice?: number | null;
+  /** @nullable */
+  rationale?: string | null;
+  /** @nullable */
+  investmentHorizon?: string | null;
+  /** @nullable */
+  bearCase?: string | null;
+  /** @nullable */
+  targetPrice?: number | null;
+  /** @nullable */
+  thesisInvalidation?: string | null;
+  /** @nullable */
+  maxAcceptableLossPct?: number | null;
+  /** @nullable */
+  exitConditions?: string | null;
+  /** @nullable */
+  currentAllocationPct?: number | null;
+  /** @nullable */
+  sectorAllocationPct?: number | null;
+  /** @nullable */
+  isSmallCap?: boolean | null;
+}
+
+export type GuardrailCheckResponseDecision = typeof GuardrailCheckResponseDecision[keyof typeof GuardrailCheckResponseDecision];
+
+
+export const GuardrailCheckResponseDecision = {
+  approve: 'approve',
+  approve_with_warnings: 'approve_with_warnings',
+  require_evidence: 'require_evidence',
+  reject: 'reject',
+} as const;
+
+export type GuardrailCheckResponseSeverity = typeof GuardrailCheckResponseSeverity[keyof typeof GuardrailCheckResponseSeverity];
+
+
+export const GuardrailCheckResponseSeverity = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+} as const;
+
+export type GuardrailCheckResponseResearchCompletenessBreakdown = { [key: string]: unknown };
+
+export interface RuleBreachItem {
+  ruleId: string;
+  ruleName: string;
+  /** @nullable */
+  currentValue?: number | null;
+  /** @nullable */
+  threshold?: number | null;
+  message: string;
+  severity: string;
+}
+
+export interface PreTradeFailure {
+  field: string;
+  message: string;
+}
+
+export interface BiasFlag {
+  bias: string;
+  detected: boolean;
+  description: string;
+  severity: string;
+}
+
+export interface StressTestResult {
+  scenario: string;
+  portfolioImpactPct: number;
+  positionImpactPct: number;
+  severity: string;
+}
+
+export interface GuardrailCheckResponse {
+  checkId: string;
+  decision: GuardrailCheckResponseDecision;
+  severity: GuardrailCheckResponseSeverity;
+  summary: string;
+  hardRuleBreaches: RuleBreachItem[];
+  softRuleWarnings: RuleBreachItem[];
+  preTradeFailures: PreTradeFailure[];
+  biasFlags: BiasFlag[];
+  stressTestResults: StressTestResult[];
+  researchCompletenessScore: number;
+  researchCompletenessBreakdown?: GuardrailCheckResponseResearchCompletenessBreakdown;
+  passedChecks: string[];
+  requiresOverride: boolean;
+  canOverride: boolean;
+  timestamp: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  /** @nullable */
+  checkId?: string | null;
+  ticker: string;
+  /** @nullable */
+  name?: string | null;
+  action: string;
+  guardianDecision: string;
+  /** @nullable */
+  severity?: string | null;
+  breachedRules?: string[];
+  biasFlags?: string[];
+  preTradeFailures?: string[];
+  researchCompletenessScore?: number;
+  isOverride: boolean;
+  /** @nullable */
+  overrideRationale?: string | null;
+  /** @nullable */
+  finalAction: string | null;
+  createdAt: string;
+}
+
+export type PortfolioHealthComponentsItem = {
+  name: string;
+  score: number;
+  maxScore: number;
+  description: string;
+};
+
+export interface PortfolioHealth {
+  score: number;
+  band: string;
+  components: PortfolioHealthComponentsItem[];
+  activeAlertCount: number;
+  thesisBrokenCount?: number;
+  thesisWeakeningCount?: number;
+  topRisks: string[];
+  cashBufferPct?: number;
+  cashBufferBelowLimit?: boolean;
+  lastCalculated: string;
+  dataSource?: string;
+}
+
+/**
+ * Opaque session token — `Bearer <sid>`.
+ */
+export type AuthorizationSessionHeaderParameter = string;
+
+export type BeginBrowserLoginParams = {
+returnTo?: string;
+};
+
+export type GetGuardrailAuditTrail200 = {
+  entries: AuditEntry[];
+  isDemo: boolean;
+  /** @nullable */
+  message?: string | null;
+};
+
 export type GetVolumeScannerParams = {
 type?: GetVolumeScannerType;
 };

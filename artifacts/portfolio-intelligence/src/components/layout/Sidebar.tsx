@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'wouter';
+import { AuthBanner } from '@/components/auth/AuthBanner';
 import { 
   LayoutDashboard, 
   PieChart, 
@@ -84,13 +85,16 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCo
         })}
       </nav>
 
-      <div className="border-t border-border p-2">
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex w-full items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
-        </button>
+      <div className="border-t border-border pt-2">
+        {!collapsed && <AuthBanner />}
+        <div className="p-2">
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="flex w-full items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
     </aside>
   );

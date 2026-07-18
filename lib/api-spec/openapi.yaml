@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Browser and mobile authentication endpoints.
   - name: portfolio
     description: Portfolio and holdings
   - name: research
@@ -22,8 +24,197 @@ tags:
     description: AI Copilot
   - name: settings
     description: Settings and import
+  - name: guardrails
+    description: Guardian Mode guardrails, checks, and audit trail
 
 paths:
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  /auth/user:
+    get:
+      tags: [auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /login:
+    get:
+      tags: [auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to OIDC.
+  /callback:
+    get:
+      tags: [auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      responses:
+        '302':
+          description: Redirect after login.
+  /logout:
+    get:
+      tags: [auth]
+      operationId: logoutBrowserSession
+      summary: Clear session and begin OIDC logout
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '302':
+          description: Redirect to OIDC logout.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MobileTokenExchangeRequest'
+      responses:
+        '200':
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+  /mobile-auth/logout:
+    post:
+      tags: [auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+      responses:
+        '200':
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutSuccess'
+
+  # ── Guardrails ────────────────────────────────────────────────────────────
+  /guardrails/settings:
+    get:
+      tags: [guardrails]
+      operationId: getGuardrailSettings
+      summary: Get guardrail configuration
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailSettingsResponse'
+    put:
+      tags: [guardrails]
+      operationId: updateGuardrailSettings
+      summary: Update guardrail configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuardrailSettingsPatch'
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailSettingsResponse'
+
+  /guardrails/check:
+    post:
+      tags: [guardrails]
+      operationId: checkGuardrails
+      summary: Run Guardian Mode check on a proposed action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuardrailCheckRequest'
+      responses:
+        '200':
+          description: Guardian review result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailCheckResponse'
+
+  /guardrails/execute:
+    post:
+      tags: [guardrails]
+      operationId: executeWithGuardrails
+      summary: Log execution of a checked action (with optional override)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuardrailExecuteRequest'
+      responses:
+        '200':
+          description: Execution logged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuardrailExecuteResponse'
+
+  /guardrails/audit-trail:
+    get:
+      tags: [guardrails]
+      operationId: getGuardrailAuditTrail
+      summary: Get audit trail of all Guardian Mode reviews
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, isDemo]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+                  isDemo:
+                    type: boolean
+                  message:
+                    type: [string, 'null']
+
+  /guardrails/portfolio-health:
+    get:
+      tags: [guardrails]
+      operationId: getPortfolioHealth
+      summary: Get portfolio health score
+      responses:
+        '200':
+          description: Portfolio health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioHealth'
+
   /healthz:
     get:
       operationId: healthCheck
@@ -645,6 +836,21 @@ paths:
                 $ref: "#/components/schemas/ImportResult"
 
 components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
   schemas:
     HealthStatus:
       type: object
@@ -1835,4 +2041,329 @@ components:
           items:
             type: string
         message:
+          type: string
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, 'null']
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    # ── Guardrails ────────────────────────────────────────────────────────────
+    GuardrailSettingsResponse:
+      type: object
+      required: [settings, isDefault]
+      properties:
+        settings:
+          type: object
+          additionalProperties: true
+        isDefault:
+          type: boolean
+
+    GuardrailSettingsPatch:
+      type: object
+      additionalProperties: true
+      description: Partial guardrail settings update
+
+    GuardrailExecuteRequest:
+      type: object
+      required: [checkId, action, ticker, userConfirmed]
+      properties:
+        checkId:
+          type: string
+        action:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: [string, 'null']
+        overrideRationale:
+          type: [string, 'null']
+        userConfirmed:
+          type: boolean
+
+    GuardrailExecuteResponse:
+      type: object
+      required: [success, isOverride]
+      properties:
+        success:
+          type: boolean
+        auditId:
+          type: integer
+        isOverride:
+          type: boolean
+
+    GuardrailCheckRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [buy, sell, add, trim, exit, review]
+        ticker:
+          type: string
+        name:
+          type: [string, 'null']
+        suggestedQuantity:
+          type: [number, 'null']
+        suggestedPrice:
+          type: [number, 'null']
+        rationale:
+          type: [string, 'null']
+        investmentHorizon:
+          type: [string, 'null']
+        bearCase:
+          type: [string, 'null']
+        targetPrice:
+          type: [number, 'null']
+        thesisInvalidation:
+          type: [string, 'null']
+        maxAcceptableLossPct:
+          type: [number, 'null']
+        exitConditions:
+          type: [string, 'null']
+        currentAllocationPct:
+          type: [number, 'null']
+        sectorAllocationPct:
+          type: [number, 'null']
+        isSmallCap:
+          type: [boolean, 'null']
+
+    GuardrailCheckResponse:
+      type: object
+      required: [checkId, decision, severity, summary, hardRuleBreaches, softRuleWarnings, preTradeFailures, biasFlags, stressTestResults, researchCompletenessScore, passedChecks, requiresOverride, canOverride, timestamp]
+      properties:
+        checkId:
+          type: string
+        decision:
+          type: string
+          enum: [approve, approve_with_warnings, require_evidence, reject]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        summary:
+          type: string
+        hardRuleBreaches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleBreachItem'
+        softRuleWarnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleBreachItem'
+        preTradeFailures:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreTradeFailure'
+        biasFlags:
+          type: array
+          items:
+            $ref: '#/components/schemas/BiasFlag'
+        stressTestResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/StressTestResult'
+        researchCompletenessScore:
+          type: integer
+        researchCompletenessBreakdown:
+          type: object
+          additionalProperties: true
+        passedChecks:
+          type: array
+          items:
+            type: string
+        requiresOverride:
+          type: boolean
+        canOverride:
+          type: boolean
+        timestamp:
+          type: string
+
+    RuleBreachItem:
+      type: object
+      required: [ruleId, ruleName, message, severity]
+      properties:
+        ruleId:
+          type: string
+        ruleName:
+          type: string
+        currentValue:
+          type: [number, 'null']
+        threshold:
+          type: [number, 'null']
+        message:
+          type: string
+        severity:
+          type: string
+
+    PreTradeFailure:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    BiasFlag:
+      type: object
+      required: [bias, detected, description, severity]
+      properties:
+        bias:
+          type: string
+        detected:
+          type: boolean
+        description:
+          type: string
+        severity:
+          type: string
+
+    StressTestResult:
+      type: object
+      required: [scenario, portfolioImpactPct, positionImpactPct, severity]
+      properties:
+        scenario:
+          type: string
+        portfolioImpactPct:
+          type: number
+        positionImpactPct:
+          type: number
+        severity:
+          type: string
+
+    AuditEntry:
+      type: object
+      required: [id, ticker, action, guardianDecision, isOverride, finalAction, createdAt]
+      properties:
+        id:
+          type: integer
+        checkId:
+          type: [string, 'null']
+        ticker:
+          type: string
+        name:
+          type: [string, 'null']
+        action:
+          type: string
+        guardianDecision:
+          type: string
+        severity:
+          type: [string, 'null']
+        breachedRules:
+          type: array
+          items:
+            type: string
+        biasFlags:
+          type: array
+          items:
+            type: string
+        preTradeFailures:
+          type: array
+          items:
+            type: string
+        researchCompletenessScore:
+          type: integer
+        isOverride:
+          type: boolean
+        overrideRationale:
+          type: [string, 'null']
+        finalAction:
+          type: [string, 'null']
+        createdAt:
+          type: string
+
+    PortfolioHealth:
+      type: object
+      required: [score, band, components, activeAlertCount, topRisks, lastCalculated]
+      properties:
+        score:
+          type: integer
+        band:
+          type: string
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, score, maxScore, description]
+            properties:
+              name:
+                type: string
+              score:
+                type: integer
+              maxScore:
+                type: integer
+              description:
+                type: string
+        activeAlertCount:
+          type: integer
+        thesisBrokenCount:
+          type: integer
+        thesisWeakeningCount:
+          type: integer
+        topRisks:
+          type: array
+          items:
+            type: string
+        cashBufferPct:
+          type: number
+        cashBufferBelowLimit:
+          type: boolean
+        lastCalculated:
+          type: string
+        dataSource:
           type: string

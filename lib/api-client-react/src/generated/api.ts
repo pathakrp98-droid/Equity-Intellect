@@ -23,6 +23,8 @@ import type {
   ActionItem,
   AlertSettings,
   AlertSettingsUpdate,
+  AuthUserEnvelope,
+  BeginBrowserLoginParams,
   BrokerSnapshot,
   BrokerageAction,
   BulkBlockDeal,
@@ -40,16 +42,27 @@ import type {
   EconomicEvent,
   ErrorResponse,
   FnoData,
+  GetGuardrailAuditTrail200,
   GetVolumeScannerParams,
+  GuardrailCheckRequest,
+  GuardrailCheckResponse,
+  GuardrailExecuteRequest,
+  GuardrailExecuteResponse,
+  GuardrailSettingsPatch,
+  GuardrailSettingsResponse,
   HealthStatus,
   Holding,
   ImportResult,
   IpoEntry,
   JournalEntry,
   JournalEntryInput,
+  LogoutSuccess,
   MacroIndicator,
   MarketIndex,
+  MobileTokenExchangeRequest,
+  MobileTokenExchangeSuccess,
   PerformanceSummary,
+  PortfolioHealth,
   PositionSizing,
   PromoterActivity,
   Recommendation,
@@ -87,6 +100,907 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetCurrentAuthUserUrl = () => {
+
+
+
+
+  return `/api/auth/user`
+}
+
+/**
+ * @summary Get the currently authenticated user
+ */
+export const getCurrentAuthUser = async ( options?: RequestInit): Promise<AuthUserEnvelope> => {
+
+  return customFetch<AuthUserEnvelope>(getGetCurrentAuthUserUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCurrentAuthUserQueryKey = () => {
+    return [
+    `/api/auth/user`
+    ] as const;
+    }
+
+
+export const getGetCurrentAuthUserQueryOptions = <TData = Awaited<ReturnType<typeof getCurrentAuthUser>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentAuthUser>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCurrentAuthUserQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCurrentAuthUser>>> = ({ signal }) => getCurrentAuthUser({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCurrentAuthUser>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCurrentAuthUserQueryResult = NonNullable<Awaited<ReturnType<typeof getCurrentAuthUser>>>
+export type GetCurrentAuthUserQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the currently authenticated user
+ */
+
+export function useGetCurrentAuthUser<TData = Awaited<ReturnType<typeof getCurrentAuthUser>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCurrentAuthUser>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCurrentAuthUserQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getBeginBrowserLoginUrl = (params?: BeginBrowserLoginParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/login?${stringifiedParams}` : `/api/login`
+}
+
+/**
+ * @summary Start the browser OIDC login flow
+ */
+export const beginBrowserLogin = async (params?: BeginBrowserLoginParams, options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getBeginBrowserLoginUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getBeginBrowserLoginQueryKey = (params?: BeginBrowserLoginParams,) => {
+    return [
+    `/api/login`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getBeginBrowserLoginQueryOptions = <TData = Awaited<ReturnType<typeof beginBrowserLogin>>, TError = ErrorType<void>>(params?: BeginBrowserLoginParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof beginBrowserLogin>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getBeginBrowserLoginQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof beginBrowserLogin>>> = ({ signal }) => beginBrowserLogin(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof beginBrowserLogin>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type BeginBrowserLoginQueryResult = NonNullable<Awaited<ReturnType<typeof beginBrowserLogin>>>
+export type BeginBrowserLoginQueryError = ErrorType<void>
+
+
+/**
+ * @summary Start the browser OIDC login flow
+ */
+
+export function useBeginBrowserLogin<TData = Awaited<ReturnType<typeof beginBrowserLogin>>, TError = ErrorType<void>>(
+ params?: BeginBrowserLoginParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof beginBrowserLogin>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getBeginBrowserLoginQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getHandleBrowserLoginCallbackUrl = () => {
+
+
+
+
+  return `/api/callback`
+}
+
+/**
+ * @summary Complete the browser OIDC login flow
+ */
+export const handleBrowserLoginCallback = async ( options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getHandleBrowserLoginCallbackUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getHandleBrowserLoginCallbackQueryKey = () => {
+    return [
+    `/api/callback`
+    ] as const;
+    }
+
+
+export const getHandleBrowserLoginCallbackQueryOptions = <TData = Awaited<ReturnType<typeof handleBrowserLoginCallback>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof handleBrowserLoginCallback>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getHandleBrowserLoginCallbackQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof handleBrowserLoginCallback>>> = ({ signal }) => handleBrowserLoginCallback({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof handleBrowserLoginCallback>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type HandleBrowserLoginCallbackQueryResult = NonNullable<Awaited<ReturnType<typeof handleBrowserLoginCallback>>>
+export type HandleBrowserLoginCallbackQueryError = ErrorType<void>
+
+
+/**
+ * @summary Complete the browser OIDC login flow
+ */
+
+export function useHandleBrowserLoginCallback<TData = Awaited<ReturnType<typeof handleBrowserLoginCallback>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof handleBrowserLoginCallback>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getHandleBrowserLoginCallbackQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getLogoutBrowserSessionUrl = () => {
+
+
+
+
+  return `/api/logout`
+}
+
+/**
+ * @summary Clear session and begin OIDC logout
+ */
+export const logoutBrowserSession = async ( options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getLogoutBrowserSessionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getLogoutBrowserSessionQueryKey = () => {
+    return [
+    `/api/logout`
+    ] as const;
+    }
+
+
+export const getLogoutBrowserSessionQueryOptions = <TData = Awaited<ReturnType<typeof logoutBrowserSession>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof logoutBrowserSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getLogoutBrowserSessionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof logoutBrowserSession>>> = ({ signal }) => logoutBrowserSession({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof logoutBrowserSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type LogoutBrowserSessionQueryResult = NonNullable<Awaited<ReturnType<typeof logoutBrowserSession>>>
+export type LogoutBrowserSessionQueryError = ErrorType<void>
+
+
+/**
+ * @summary Clear session and begin OIDC logout
+ */
+
+export function useLogoutBrowserSession<TData = Awaited<ReturnType<typeof logoutBrowserSession>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof logoutBrowserSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getLogoutBrowserSessionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExchangeMobileAuthorizationCodeUrl = () => {
+
+
+
+
+  return `/api/mobile-auth/token-exchange`
+}
+
+/**
+ * @summary Exchange a mobile OIDC code for a session token
+ */
+export const exchangeMobileAuthorizationCode = async (mobileTokenExchangeRequest: MobileTokenExchangeRequest, options?: RequestInit): Promise<MobileTokenExchangeSuccess> => {
+
+  return customFetch<MobileTokenExchangeSuccess>(getExchangeMobileAuthorizationCodeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mobileTokenExchangeRequest)
+  }
+);}
+
+
+
+
+
+export const getExchangeMobileAuthorizationCodeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext> => {
+
+const mutationKey = ['exchangeMobileAuthorizationCode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, {data: BodyType<MobileTokenExchangeRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  exchangeMobileAuthorizationCode(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExchangeMobileAuthorizationCodeMutationResult = NonNullable<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>>
+    export type ExchangeMobileAuthorizationCodeMutationBody = BodyType<MobileTokenExchangeRequest>
+    export type ExchangeMobileAuthorizationCodeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Exchange a mobile OIDC code for a session token
+ */
+export const useExchangeMobileAuthorizationCode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>,
+        TError,
+        {data: BodyType<MobileTokenExchangeRequest>},
+        TContext
+      > => {
+      return useMutation(getExchangeMobileAuthorizationCodeMutationOptions(options));
+    }
+
+export const getLogoutMobileSessionUrl = () => {
+
+
+
+
+  return `/api/mobile-auth/logout`
+}
+
+/**
+ * @summary Delete a mobile session token
+ */
+export const logoutMobileSession = async ( options?: RequestInit): Promise<LogoutSuccess> => {
+
+  return customFetch<LogoutSuccess>(getLogoutMobileSessionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getLogoutMobileSessionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logoutMobileSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof logoutMobileSession>>, TError,void, TContext> => {
+
+const mutationKey = ['logoutMobileSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof logoutMobileSession>>, void> = () => {
+
+
+          return  logoutMobileSession(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LogoutMobileSessionMutationResult = NonNullable<Awaited<ReturnType<typeof logoutMobileSession>>>
+
+    export type LogoutMobileSessionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a mobile session token
+ */
+export const useLogoutMobileSession = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logoutMobileSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof logoutMobileSession>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getLogoutMobileSessionMutationOptions(options));
+    }
+
+export const getGetGuardrailSettingsUrl = () => {
+
+
+
+
+  return `/api/guardrails/settings`
+}
+
+/**
+ * @summary Get guardrail configuration
+ */
+export const getGuardrailSettings = async ( options?: RequestInit): Promise<GuardrailSettingsResponse> => {
+
+  return customFetch<GuardrailSettingsResponse>(getGetGuardrailSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGuardrailSettingsQueryKey = () => {
+    return [
+    `/api/guardrails/settings`
+    ] as const;
+    }
+
+
+export const getGetGuardrailSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getGuardrailSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGuardrailSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGuardrailSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGuardrailSettings>>> = ({ signal }) => getGuardrailSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGuardrailSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGuardrailSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getGuardrailSettings>>>
+export type GetGuardrailSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get guardrail configuration
+ */
+
+export function useGetGuardrailSettings<TData = Awaited<ReturnType<typeof getGuardrailSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGuardrailSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGuardrailSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateGuardrailSettingsUrl = () => {
+
+
+
+
+  return `/api/guardrails/settings`
+}
+
+/**
+ * @summary Update guardrail configuration
+ */
+export const updateGuardrailSettings = async (guardrailSettingsPatch: GuardrailSettingsPatch, options?: RequestInit): Promise<GuardrailSettingsResponse> => {
+
+  return customFetch<GuardrailSettingsResponse>(getUpdateGuardrailSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guardrailSettingsPatch)
+  }
+);}
+
+
+
+
+
+export const getUpdateGuardrailSettingsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGuardrailSettings>>, TError,{data: BodyType<GuardrailSettingsPatch>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateGuardrailSettings>>, TError,{data: BodyType<GuardrailSettingsPatch>}, TContext> => {
+
+const mutationKey = ['updateGuardrailSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateGuardrailSettings>>, {data: BodyType<GuardrailSettingsPatch>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateGuardrailSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateGuardrailSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateGuardrailSettings>>>
+    export type UpdateGuardrailSettingsMutationBody = BodyType<GuardrailSettingsPatch>
+    export type UpdateGuardrailSettingsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update guardrail configuration
+ */
+export const useUpdateGuardrailSettings = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateGuardrailSettings>>, TError,{data: BodyType<GuardrailSettingsPatch>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateGuardrailSettings>>,
+        TError,
+        {data: BodyType<GuardrailSettingsPatch>},
+        TContext
+      > => {
+      return useMutation(getUpdateGuardrailSettingsMutationOptions(options));
+    }
+
+export const getCheckGuardrailsUrl = () => {
+
+
+
+
+  return `/api/guardrails/check`
+}
+
+/**
+ * @summary Run Guardian Mode check on a proposed action
+ */
+export const checkGuardrails = async (guardrailCheckRequest: GuardrailCheckRequest, options?: RequestInit): Promise<GuardrailCheckResponse> => {
+
+  return customFetch<GuardrailCheckResponse>(getCheckGuardrailsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guardrailCheckRequest)
+  }
+);}
+
+
+
+
+
+export const getCheckGuardrailsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkGuardrails>>, TError,{data: BodyType<GuardrailCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof checkGuardrails>>, TError,{data: BodyType<GuardrailCheckRequest>}, TContext> => {
+
+const mutationKey = ['checkGuardrails'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkGuardrails>>, {data: BodyType<GuardrailCheckRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  checkGuardrails(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CheckGuardrailsMutationResult = NonNullable<Awaited<ReturnType<typeof checkGuardrails>>>
+    export type CheckGuardrailsMutationBody = BodyType<GuardrailCheckRequest>
+    export type CheckGuardrailsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run Guardian Mode check on a proposed action
+ */
+export const useCheckGuardrails = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkGuardrails>>, TError,{data: BodyType<GuardrailCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof checkGuardrails>>,
+        TError,
+        {data: BodyType<GuardrailCheckRequest>},
+        TContext
+      > => {
+      return useMutation(getCheckGuardrailsMutationOptions(options));
+    }
+
+export const getExecuteWithGuardrailsUrl = () => {
+
+
+
+
+  return `/api/guardrails/execute`
+}
+
+/**
+ * @summary Log execution of a checked action (with optional override)
+ */
+export const executeWithGuardrails = async (guardrailExecuteRequest: GuardrailExecuteRequest, options?: RequestInit): Promise<GuardrailExecuteResponse> => {
+
+  return customFetch<GuardrailExecuteResponse>(getExecuteWithGuardrailsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guardrailExecuteRequest)
+  }
+);}
+
+
+
+
+
+export const getExecuteWithGuardrailsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof executeWithGuardrails>>, TError,{data: BodyType<GuardrailExecuteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof executeWithGuardrails>>, TError,{data: BodyType<GuardrailExecuteRequest>}, TContext> => {
+
+const mutationKey = ['executeWithGuardrails'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof executeWithGuardrails>>, {data: BodyType<GuardrailExecuteRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  executeWithGuardrails(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ExecuteWithGuardrailsMutationResult = NonNullable<Awaited<ReturnType<typeof executeWithGuardrails>>>
+    export type ExecuteWithGuardrailsMutationBody = BodyType<GuardrailExecuteRequest>
+    export type ExecuteWithGuardrailsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Log execution of a checked action (with optional override)
+ */
+export const useExecuteWithGuardrails = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof executeWithGuardrails>>, TError,{data: BodyType<GuardrailExecuteRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof executeWithGuardrails>>,
+        TError,
+        {data: BodyType<GuardrailExecuteRequest>},
+        TContext
+      > => {
+      return useMutation(getExecuteWithGuardrailsMutationOptions(options));
+    }
+
+export const getGetGuardrailAuditTrailUrl = () => {
+
+
+
+
+  return `/api/guardrails/audit-trail`
+}
+
+/**
+ * @summary Get audit trail of all Guardian Mode reviews
+ */
+export const getGuardrailAuditTrail = async ( options?: RequestInit): Promise<GetGuardrailAuditTrail200> => {
+
+  return customFetch<GetGuardrailAuditTrail200>(getGetGuardrailAuditTrailUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGuardrailAuditTrailQueryKey = () => {
+    return [
+    `/api/guardrails/audit-trail`
+    ] as const;
+    }
+
+
+export const getGetGuardrailAuditTrailQueryOptions = <TData = Awaited<ReturnType<typeof getGuardrailAuditTrail>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGuardrailAuditTrail>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGuardrailAuditTrailQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGuardrailAuditTrail>>> = ({ signal }) => getGuardrailAuditTrail({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGuardrailAuditTrail>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGuardrailAuditTrailQueryResult = NonNullable<Awaited<ReturnType<typeof getGuardrailAuditTrail>>>
+export type GetGuardrailAuditTrailQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get audit trail of all Guardian Mode reviews
+ */
+
+export function useGetGuardrailAuditTrail<TData = Awaited<ReturnType<typeof getGuardrailAuditTrail>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGuardrailAuditTrail>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGuardrailAuditTrailQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetPortfolioHealthUrl = () => {
+
+
+
+
+  return `/api/guardrails/portfolio-health`
+}
+
+/**
+ * @summary Get portfolio health score
+ */
+export const getPortfolioHealth = async ( options?: RequestInit): Promise<PortfolioHealth> => {
+
+  return customFetch<PortfolioHealth>(getGetPortfolioHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortfolioHealthQueryKey = () => {
+    return [
+    `/api/guardrails/portfolio-health`
+    ] as const;
+    }
+
+
+export const getGetPortfolioHealthQueryOptions = <TData = Awaited<ReturnType<typeof getPortfolioHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPortfolioHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortfolioHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortfolioHealth>>> = ({ signal }) => getPortfolioHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortfolioHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPortfolioHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getPortfolioHealth>>>
+export type GetPortfolioHealthQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get portfolio health score
+ */
+
+export function useGetPortfolioHealth<TData = Awaited<ReturnType<typeof getPortfolioHealth>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPortfolioHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPortfolioHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

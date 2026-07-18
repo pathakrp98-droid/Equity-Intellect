@@ -1,524 +1,254 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
+import { db, watchlistTable, decisionJournalTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 
 const router = Router();
 
+// ── Demo Holdings (read-only demo data — will require live-data integration for production) ──
 const HOLDINGS = [
-  {
-    ticker: "HDFCBANK",
-    name: "HDFC Bank",
-    sector: "Banking & Finance",
-    quantity: 350,
-    avgBuyPrice: 1482.4,
-    ltp: 1618.75,
-    currentValue: 566562.5,
-    investedValue: 518840,
-    pnl: 47722.5,
-    pnlPct: 9.2,
-    dayChange: 14.25,
-    dayChangePct: 0.89,
-    allocationPct: 11.74,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2022-11-14",
-    targetPrice: 1900,
-    stopLoss: 1380,
-    idealWeight: 12.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "RELIANCE",
-    name: "Reliance Industries",
-    sector: "Energy",
-    quantity: 210,
-    avgBuyPrice: 2210.6,
-    ltp: 2847.3,
-    currentValue: 597933,
-    investedValue: 464226,
-    pnl: 133707,
-    pnlPct: 28.8,
-    dayChange: -22.4,
-    dayChangePct: -0.78,
-    allocationPct: 12.39,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2021-08-03",
-    targetPrice: 3400,
-    stopLoss: 2400,
-    idealWeight: 12.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "INFY",
-    name: "Infosys",
-    sector: "Technology",
-    quantity: 420,
-    avgBuyPrice: 1456.8,
-    ltp: 1742.5,
-    currentValue: 731850,
-    investedValue: 611856,
-    pnl: 119994,
-    pnlPct: 19.61,
-    dayChange: 28.6,
-    dayChangePct: 1.67,
-    allocationPct: 15.17,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2021-05-18",
-    targetPrice: 2100,
-    stopLoss: 1500,
-    idealWeight: 15.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "TCS",
-    name: "Tata Consultancy Services",
-    sector: "Technology",
-    quantity: 80,
-    avgBuyPrice: 3248.5,
-    ltp: 3812.4,
-    currentValue: 304992,
-    investedValue: 259880,
-    pnl: 45112,
-    pnlPct: 17.36,
-    dayChange: 41.8,
-    dayChangePct: 1.11,
-    allocationPct: 6.32,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2022-03-22",
-    targetPrice: 4500,
-    stopLoss: 3200,
-    idealWeight: 7.0,
-    broker: "HDFC",
-    hasAlert: false,
-  },
-  {
-    ticker: "BAJFINANCE",
-    name: "Bajaj Finance",
-    sector: "Banking & Finance",
-    quantity: 95,
-    avgBuyPrice: 6248.0,
-    ltp: 6830.5,
-    currentValue: 648897.5,
-    investedValue: 593560,
-    pnl: 55337.5,
-    pnlPct: 9.32,
-    dayChange: -84.5,
-    dayChangePct: -1.22,
-    allocationPct: 13.45,
-    conviction: "medium",
-    thesisStatus: "weakening",
-    entryDate: "2020-07-10",
-    targetPrice: 8500,
-    stopLoss: 6000,
-    idealWeight: 10.0,
-    broker: "Zerodha",
-    hasAlert: true,
-  },
-  {
-    ticker: "DMART",
-    name: "Avenue Supermarts",
-    sector: "Consumer",
-    quantity: 110,
-    avgBuyPrice: 3850.0,
-    ltp: 4724.6,
-    currentValue: 519706,
-    investedValue: 423500,
-    pnl: 96206,
-    pnlPct: 22.72,
-    dayChange: 36.2,
-    dayChangePct: 0.77,
-    allocationPct: 10.77,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2021-01-28",
-    targetPrice: 5500,
-    stopLoss: 4000,
-    idealWeight: 9.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "ASIANPAINT",
-    name: "Asian Paints",
-    sector: "Consumer",
-    quantity: 130,
-    avgBuyPrice: 2840.0,
-    ltp: 2964.3,
-    currentValue: 385359,
-    investedValue: 369200,
-    pnl: 16159,
-    pnlPct: 4.38,
-    dayChange: -18.7,
-    dayChangePct: -0.63,
-    allocationPct: 7.99,
-    conviction: "medium",
-    thesisStatus: "weakening",
-    entryDate: "2022-06-15",
-    targetPrice: 3600,
-    stopLoss: 2600,
-    idealWeight: 7.0,
-    broker: "HDFC",
-    hasAlert: true,
-  },
-  {
-    ticker: "KOTAKBANK",
-    name: "Kotak Mahindra Bank",
-    sector: "Banking & Finance",
-    quantity: 185,
-    avgBuyPrice: 1742.3,
-    ltp: 1892.6,
-    currentValue: 350131,
-    investedValue: 322325.5,
-    pnl: 27805.5,
-    pnlPct: 8.63,
-    dayChange: 12.4,
-    dayChangePct: 0.66,
-    allocationPct: 7.26,
-    conviction: "medium",
-    thesisStatus: "monitoring",
-    entryDate: "2023-02-07",
-    targetPrice: 2300,
-    stopLoss: 1650,
-    idealWeight: 8.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "MARUTI",
-    name: "Maruti Suzuki India",
-    sector: "Auto",
-    quantity: 42,
-    avgBuyPrice: 9240.0,
-    ltp: 10482.5,
-    currentValue: 440265,
-    investedValue: 388080,
-    pnl: 52185,
-    pnlPct: 13.45,
-    dayChange: 98.5,
-    dayChangePct: 0.95,
-    allocationPct: 9.12,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2022-09-05",
-    targetPrice: 13000,
-    stopLoss: 9000,
-    idealWeight: 9.0,
-    broker: "HDFC",
-    hasAlert: false,
-  },
-  {
-    ticker: "SUNPHARMA",
-    name: "Sun Pharmaceutical Industries",
-    sector: "Pharma",
-    quantity: 125,
-    avgBuyPrice: 1148.6,
-    ltp: 1628.4,
-    currentValue: 203550,
-    investedValue: 143575,
-    pnl: 59975,
-    pnlPct: 41.77,
-    dayChange: 22.1,
-    dayChangePct: 1.38,
-    allocationPct: 4.22,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2021-11-20",
-    targetPrice: 2000,
-    stopLoss: 1400,
-    idealWeight: 6.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "TITAN",
-    name: "Titan Company",
-    sector: "Consumer",
-    quantity: 145,
-    avgBuyPrice: 2748.0,
-    ltp: 3214.8,
-    currentValue: 466146,
-    investedValue: 398460,
-    pnl: 67686,
-    pnlPct: 16.99,
-    dayChange: 34.6,
-    dayChangePct: 1.09,
-    allocationPct: 9.66,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2021-03-14",
-    targetPrice: 4000,
-    stopLoss: 2800,
-    idealWeight: 9.0,
-    broker: "Zerodha",
-    hasAlert: false,
-  },
-  {
-    ticker: "PIDILITIND",
-    name: "Pidilite Industries",
-    sector: "Chemicals",
-    quantity: 90,
-    avgBuyPrice: 2248.5,
-    ltp: 2580.3,
-    currentValue: 232227,
-    investedValue: 202365,
-    pnl: 29862,
-    pnlPct: 14.76,
-    dayChange: 18.9,
-    dayChangePct: 0.74,
-    allocationPct: 4.81,
-    conviction: "high",
-    thesisStatus: "intact",
-    entryDate: "2022-04-08",
-    targetPrice: 3200,
-    stopLoss: 2200,
-    idealWeight: 5.0,
-    broker: "HDFC",
-    hasAlert: false,
-  },
+  { ticker: "HDFCBANK", name: "HDFC Bank", sector: "Banking & Finance", quantity: 350, avgBuyPrice: 1482.4, ltp: 1618.75, currentValue: 566562.5, investedValue: 518840, pnl: 47722.5, pnlPct: 9.2, dayChange: 14.25, dayChangePct: 0.89, allocationPct: 11.74, conviction: "high", thesisStatus: "intact", entryDate: "2022-11-14", targetPrice: 1700, stopLoss: 1380, idealWeight: 12.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "RELIANCE", name: "Reliance Industries", sector: "Energy", quantity: 210, avgBuyPrice: 2210.6, ltp: 2847.3, currentValue: 597933, investedValue: 464226, pnl: 133707, pnlPct: 28.8, dayChange: -22.4, dayChangePct: -0.78, allocationPct: 12.39, conviction: "high", thesisStatus: "intact", entryDate: "2021-08-03", targetPrice: 3000, stopLoss: 2400, idealWeight: 12.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "INFY", name: "Infosys", sector: "Technology", quantity: 420, avgBuyPrice: 1456.8, ltp: 1742.5, currentValue: 731850, investedValue: 611856, pnl: 119994, pnlPct: 19.61, dayChange: 28.6, dayChangePct: 1.67, allocationPct: 15.17, conviction: "high", thesisStatus: "intact", entryDate: "2021-05-18", targetPrice: 2000, stopLoss: 1500, idealWeight: 15.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "TCS", name: "Tata Consultancy Services", sector: "Technology", quantity: 80, avgBuyPrice: 3248.5, ltp: 3812.4, currentValue: 304992, investedValue: 259880, pnl: 45112, pnlPct: 17.36, dayChange: 42.1, dayChangePct: 1.12, allocationPct: 6.32, conviction: "medium", thesisStatus: "intact", entryDate: "2022-04-12", targetPrice: 4000, stopLoss: 3200, idealWeight: 6.0, broker: "HDFC Securities", hasAlert: false },
+  { ticker: "BAJFINANCE", name: "Bajaj Finance", sector: "Banking & Finance", quantity: 180, avgBuyPrice: 6842.3, ltp: 6924.6, currentValue: 1246428, investedValue: 1231614, pnl: 14814, pnlPct: 1.2, dayChange: -86.4, dayChangePct: -1.23, allocationPct: 13.41, conviction: "high", thesisStatus: "weakening", entryDate: "2020-09-22", targetPrice: 8500, stopLoss: 6200, idealWeight: 13.0, broker: "Zerodha", hasAlert: true },
+  { ticker: "ASIANPAINT", name: "Asian Paints", sector: "Consumer", quantity: 240, avgBuyPrice: 2986.4, ltp: 2318.5, currentValue: 556440, investedValue: 716736, pnl: -160296, pnlPct: -22.36, dayChange: -31.2, dayChangePct: -1.33, allocationPct: 11.53, conviction: "medium", thesisStatus: "weakening", entryDate: "2021-11-30", targetPrice: 3200, stopLoss: 2100, idealWeight: 10.0, broker: "HDFC Securities", hasAlert: true },
+  { ticker: "KOTAKBANK", name: "Kotak Mahindra Bank", sector: "Banking & Finance", quantity: 190, avgBuyPrice: 1724.6, ltp: 1893.2, currentValue: 359708, investedValue: 327674, pnl: 32034, pnlPct: 9.77, dayChange: 11.8, dayChangePct: 0.63, allocationPct: 7.45, conviction: "medium", thesisStatus: "intact", entryDate: "2023-02-08", targetPrice: 2000, stopLoss: 1600, idealWeight: 8.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "DMART", name: "Avenue Supermarts", sector: "Consumer", quantity: 65, avgBuyPrice: 4218.6, ltp: 4682.3, currentValue: 304349.5, investedValue: 282609, pnl: 21740.5, pnlPct: 7.69, dayChange: 24.6, dayChangePct: 0.53, allocationPct: 6.31, conviction: "high", thesisStatus: "intact", entryDate: "2022-07-19", targetPrice: 5000, stopLoss: 4000, idealWeight: 6.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "MARUTI", name: "Maruti Suzuki", sector: "Auto", quantity: 42, avgBuyPrice: 8642.3, ltp: 10284.6, currentValue: 431953.2, investedValue: 362976.6, pnl: 68976.6, pnlPct: 19.0, dayChange: 82.4, dayChangePct: 0.81, allocationPct: 8.95, conviction: "high", thesisStatus: "intact", entryDate: "2022-02-14", targetPrice: 11000, stopLoss: 8800, idealWeight: 9.0, broker: "HDFC Securities", hasAlert: false },
+  { ticker: "SUNPHARMA", name: "Sun Pharmaceutical", sector: "Pharma", quantity: 145, avgBuyPrice: 1124.6, ltp: 1386.4, currentValue: 201028, investedValue: 163067, pnl: 37961, pnlPct: 23.28, dayChange: -14.2, dayChangePct: -1.01, allocationPct: 4.17, conviction: "medium", thesisStatus: "intact", entryDate: "2023-05-11", targetPrice: 1750, stopLoss: 1200, idealWeight: 4.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "TITAN", name: "Titan Company", sector: "Consumer", quantity: 78, avgBuyPrice: 2886.4, ltp: 3124.8, currentValue: 243734.4, investedValue: 225139.2, pnl: 18595.2, pnlPct: 8.26, dayChange: 18.6, dayChangePct: 0.6, allocationPct: 5.05, conviction: "medium", thesisStatus: "intact", entryDate: "2023-08-22", targetPrice: 3300, stopLoss: 2700, idealWeight: 5.0, broker: "Zerodha", hasAlert: false },
+  { ticker: "PIDILITIND", name: "Pidilite Industries", sector: "Consumer", quantity: 62, avgBuyPrice: 2486.4, ltp: 2714.2, currentValue: 168280.4, investedValue: 154156.8, pnl: 14123.6, pnlPct: 9.16, dayChange: 16.8, dayChangePct: 0.62, allocationPct: 3.49, conviction: "low", thesisStatus: "intact", entryDate: "2023-11-06", targetPrice: 2700, stopLoss: 2300, idealWeight: 3.0, broker: "HDFC Securities", hasAlert: false },
 ];
 
-const WATCHLIST = [
-  {
-    id: "wl-1",
-    ticker: "ZOMATO",
-    name: "Zomato",
-    sector: "Consumer Tech",
-    ltp: 248.6,
-    dayChange: 4.8,
-    dayChangePct: 1.97,
-    watchedSince: "2024-01-15",
-    conviction: "high",
-    notes: "Blinkit hitting profitability ahead of schedule. GOV compounding at 80%+. Thesis: food delivery duopoly + quick commerce platform. Entry on dip below ₹220 for 3% position.",
-    targetEntryPrice: 220,
-    pe: 228.4,
-    marketCap: 21_84_000,
-  },
-  {
-    id: "wl-2",
-    ticker: "DIXON",
-    name: "Dixon Technologies",
-    sector: "Technology",
-    ltp: 14_248.5,
-    dayChange: -184.3,
-    dayChangePct: -1.28,
-    watchedSince: "2023-11-20",
-    conviction: "high",
-    notes: "PLI scheme beneficiary. EMS play on India electronics manufacturing. Apple supply chain entry could be transformative. Watching for valuation comfort — expensive at 70x+ FY26 PE.",
-    targetEntryPrice: 11000,
-    pe: 74.2,
-    marketCap: 85_400,
-  },
-  {
-    id: "wl-3",
-    ticker: "TRENT",
-    name: "Trent",
-    sector: "Consumer",
-    ltp: 5824.3,
-    dayChange: 62.4,
-    dayChangePct: 1.08,
-    watchedSince: "2024-03-05",
-    conviction: "medium",
-    notes: "Zudio store count expansion rapid. Fashion retail getting disruptive. Promoter quality excellent (Tata). Expensive at 110x+ — wait for meaningful correction or earnings de-rating.",
-    targetEntryPrice: 4500,
-    pe: 118.4,
-    marketCap: 2_07_200,
-  },
-  {
-    id: "wl-4",
-    ticker: "POLICYBZR",
-    name: "PB Fintech (Policybazaar)",
-    sector: "Fintech",
-    ltp: 1642.8,
-    dayChange: 28.4,
-    dayChangePct: 1.76,
-    watchedSince: "2024-06-10",
-    conviction: "medium",
-    notes: "Insurance distribution moat building. PAT positive for 3 consecutive quarters. Growing embedded insurance (Paisabazaar credit). Path to ₹1000 Cr profit by FY27 reasonable.",
-    targetEntryPrice: 1400,
-    pe: null,
-    marketCap: 73_400,
-  },
-  {
-    id: "wl-5",
-    ticker: "NAUKRI",
-    name: "Info Edge India",
-    sector: "Technology",
-    ltp: 7248.6,
-    dayChange: -42.8,
-    dayChangePct: -0.59,
-    watchedSince: "2024-02-28",
-    conviction: "medium",
-    notes: "Naukri hiring cycle turning. Zomato stake (55M shares) underappreciated. 99acres recovery in real estate upcycle. Good quality compounder — waiting for better entry.",
-    targetEntryPrice: 6500,
-    pe: 68.4,
-    marketCap: 93_600,
-  },
+const DEMO_WATCHLIST = [
+  { ticker: "ZOMATO", name: "Zomato", sector: "Consumer Tech", ltp: 224.6, dayChangePct: 2.14, watchedSince: "2024-08-01", notes: "Profitability inflection — monitoring for entry", targetEntry: 190, conviction: "medium" },
+  { ticker: "POLYCAB", name: "Polycab India", sector: "Capital Goods", ltp: 5842.3, dayChangePct: 0.84, watchedSince: "2024-09-14", notes: "Premiumisation + infra capex beneficiary", targetEntry: 5200, conviction: "high" },
+  { ticker: "LTIM", name: "LTIMindtree", sector: "Technology", ltp: 4682.8, dayChangePct: -0.42, watchedSince: "2024-11-22", notes: "AI-services portfolio — evaluating vs INFY thesis", targetEntry: 4400, conviction: "low" },
+  { ticker: "NAUKRI", name: "Info Edge (Naukri)", sector: "Consumer Tech", ltp: 6842.1, dayChangePct: 0.31, watchedSince: "2025-01-08", notes: "Job market recovery + Zomato stake optionality", targetEntry: 6400, conviction: "medium" },
 ];
 
-router.get("/holdings", (req, res) => {
+const PERFORMANCE_DATA = {
+  timeSeries: [
+    { date: "2024-07", portfolioValue: 3820000, benchmark: 3720000 },
+    { date: "2024-08", portfolioValue: 4012000, benchmark: 3890000 },
+    { date: "2024-09", portfolioValue: 3968000, benchmark: 3841000 },
+    { date: "2024-10", portfolioValue: 4142000, benchmark: 3980000 },
+    { date: "2024-11", portfolioValue: 4284000, benchmark: 4086000 },
+    { date: "2024-12", portfolioValue: 4418000, benchmark: 4142000 },
+    { date: "2025-01", portfolioValue: 4523000, benchmark: 4214000 },
+    { date: "2025-02", portfolioValue: 4382000, benchmark: 4087000 },
+    { date: "2025-03", portfolioValue: 4612000, benchmark: 4282000 },
+    { date: "2025-04", portfolioValue: 4742000, benchmark: 4386000 },
+    { date: "2025-05", portfolioValue: 4814000, benchmark: 4442000 },
+    { date: "2025-06", portfolioValue: 4824000, benchmark: 4498000 },
+  ],
+  attribution: [
+    { name: "INFY", contribution: 2.48, reason: "Deal wins + margin expansion" },
+    { name: "MARUTI", contribution: 1.43, reason: "Volume recovery + EV optionality" },
+    { name: "RELIANCE", contribution: 1.38, reason: "Retail + Jio growth" },
+    { name: "ASIANPAINT", contribution: -3.32, reason: "Margin compression + competition" },
+    { name: "BAJFINANCE", contribution: 0.31, reason: "NIM pressure partially offset by volume" },
+  ],
+  metrics: {
+    absoluteReturn: 26.4,
+    niftyReturn: 21.2,
+    alpha: 5.2,
+    sharpeRatio: 1.84,
+    maxDrawdown: -12.4,
+    winRate: 67,
+    avgHoldingDays: 482,
+    bestMonth: "+8.2% (Oct 2023)",
+    worstMonth: "-6.1% (Jan 2022)",
+  },
+};
+
+// ── GET /portfolio/holdings — demo data always ─────────────────────────────
+router.get("/holdings", (_req: Request, res: Response) => {
   res.json(HOLDINGS);
 });
 
-router.get("/watchlist", (req, res) => {
-  res.json(WATCHLIST);
+// ── GET /portfolio/watchlist ───────────────────────────────────────────────
+router.get("/watchlist", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.json(DEMO_WATCHLIST.map((item) => ({
+      ...item,
+      isDemo: true,
+    })));
+    return;
+  }
+
+  const dbItems = await db
+    .select()
+    .from(watchlistTable)
+    .where(eq(watchlistTable.userId, req.user.id));
+
+  if (dbItems.length === 0) {
+    // Return demo items with isDemo flag when the user has no saved items yet
+    res.json(DEMO_WATCHLIST.map((item) => ({
+      ...item,
+      isDemo: true,
+      seedHint: "These are demo items — add your first real watchlist item to replace them",
+    })));
+    return;
+  }
+
+  res.json(dbItems.map((item) => ({
+    ticker: item.ticker,
+    name: item.name,
+    sector: item.sector,
+    notes: item.notes,
+    watchedSince: item.addedAt.toISOString().split("T")[0],
+    id: item.id,
+    isDemo: false,
+  })));
 });
 
-router.post("/watchlist", (req, res) => {
-  const body = req.body;
-  const item = {
-    id: `wl-${Date.now()}`,
-    ...body,
-    ltp: 0,
-    dayChange: 0,
-    dayChangePct: 0,
-    watchedSince: new Date().toISOString().split("T")[0],
-    pe: null,
-    marketCap: null,
-  };
-  WATCHLIST.push(item);
-  res.status(201).json(item);
+// ── POST /portfolio/watchlist ──────────────────────────────────────────────
+router.post("/watchlist", async (req: Request, res: Response) => {
+  const { ticker, name, sector, notes } = req.body;
+  if (!ticker || !name) {
+    res.status(400).json({ error: "ticker and name are required" });
+    return;
+  }
+
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Sign in to save watchlist items permanently" });
+    return;
+  }
+
+  const [item] = await db
+    .insert(watchlistTable)
+    .values({ userId: req.user.id, ticker: ticker.toUpperCase(), name, sector, notes })
+    .onConflictDoNothing()
+    .returning();
+
+  res.status(201).json({ ticker: item.ticker, name: item.name, sector: item.sector, notes: item.notes, isDemo: false });
 });
 
-router.delete("/watchlist/:ticker", (req, res) => {
-  const idx = WATCHLIST.findIndex((w) => w.ticker === req.params.ticker);
-  if (idx !== -1) WATCHLIST.splice(idx, 1);
+// ── DELETE /portfolio/watchlist/:ticker ────────────────────────────────────
+router.delete("/watchlist/:ticker", async (req: Request, res: Response) => {
+  const ticker = req.params.ticker.toUpperCase();
+
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Sign in to manage your watchlist" });
+    return;
+  }
+
+  await db
+    .delete(watchlistTable)
+    .where(and(eq(watchlistTable.userId, req.user.id), eq(watchlistTable.ticker, ticker)));
+
   res.status(204).send();
 });
 
-router.get("/performance", (req, res) => {
+// ── GET /portfolio/performance ─────────────────────────────────────────────
+router.get("/performance", (_req: Request, res: Response) => {
+  res.json(PERFORMANCE_DATA);
+});
+
+// ── GET /portfolio/risk ────────────────────────────────────────────────────
+router.get("/risk", (_req: Request, res: Response) => {
   res.json({
-    absoluteReturn: 25.63,
-    xirr: 22.4,
-    niftyReturn: 18.7,
-    alpha: 3.7,
-    beta: 0.88,
-    sharpeRatio: 1.42,
-    maxDrawdown: -18.2,
-    attributions: [
-      { ticker: "INFY", name: "Infosys", contribution: 3.84, allocationEffect: 1.2, selectionEffect: 2.64 },
-      { ticker: "RELIANCE", name: "Reliance Industries", contribution: 3.12, allocationEffect: 0.8, selectionEffect: 2.32 },
-      { ticker: "SUNPHARMA", name: "Sun Pharma", contribution: 2.84, allocationEffect: -0.4, selectionEffect: 3.24 },
-      { ticker: "TITAN", name: "Titan Company", contribution: 2.41, allocationEffect: 0.6, selectionEffect: 1.81 },
-      { ticker: "MARUTI", name: "Maruti Suzuki", contribution: 1.98, allocationEffect: 0.3, selectionEffect: 1.68 },
-      { ticker: "DMART", name: "Avenue Supermarts", contribution: 1.82, allocationEffect: 0.5, selectionEffect: 1.32 },
-      { ticker: "HDFCBANK", name: "HDFC Bank", contribution: 1.42, allocationEffect: 1.4, selectionEffect: 0.02 },
-      { ticker: "BAJFINANCE", name: "Bajaj Finance", contribution: 1.18, allocationEffect: 0.8, selectionEffect: 0.38 },
-      { ticker: "TCS", name: "TCS", contribution: 0.98, allocationEffect: -0.2, selectionEffect: 1.18 },
-      { ticker: "PIDILITIND", name: "Pidilite Industries", contribution: 0.76, allocationEffect: -0.1, selectionEffect: 0.86 },
-      { ticker: "ASIANPAINT", name: "Asian Paints", contribution: 0.14, allocationEffect: 0.4, selectionEffect: -0.26 },
-      { ticker: "KOTAKBANK", name: "Kotak Mahindra Bank", contribution: 0.82, allocationEffect: 0.2, selectionEffect: 0.62 },
+    dataSource: "DEMO — connect live portfolio data for real-time risk calculations",
+    sectorBreakdown: [
+      { sector: "Banking & Finance", weight: 32.6, limit: 35, status: "caution" },
+      { sector: "Technology", weight: 21.49, limit: 30, status: "ok" },
+      { sector: "Consumer", weight: 21.07, limit: 30, status: "ok" },
+      { sector: "Energy", weight: 12.39, limit: 25, status: "ok" },
+      { sector: "Auto", weight: 8.95, limit: 15, status: "ok" },
+      { sector: "Pharma", weight: 4.17, limit: 15, status: "ok" },
     ],
-    monthlyReturns: [
-      { month: "Aug 2024", portfolioReturn: 3.2, benchmarkReturn: 2.4 },
-      { month: "Sep 2024", portfolioReturn: -1.4, benchmarkReturn: -2.1 },
-      { month: "Oct 2024", portfolioReturn: 2.8, benchmarkReturn: 1.6 },
-      { month: "Nov 2024", portfolioReturn: 4.1, benchmarkReturn: 3.2 },
-      { month: "Dec 2024", portfolioReturn: -0.8, benchmarkReturn: -0.4 },
-      { month: "Jan 2025", portfolioReturn: 1.9, benchmarkReturn: 0.8 },
-      { month: "Feb 2025", portfolioReturn: 3.4, benchmarkReturn: 2.6 },
-      { month: "Mar 2025", portfolioReturn: 2.1, benchmarkReturn: 1.8 },
-      { month: "Apr 2025", portfolioReturn: -1.2, benchmarkReturn: -1.8 },
-      { month: "May 2025", portfolioReturn: 2.8, benchmarkReturn: 2.1 },
-      { month: "Jun 2025", portfolioReturn: 3.6, benchmarkReturn: 2.8 },
-      { month: "Jul 2025", portfolioReturn: 1.8, benchmarkReturn: 1.4 },
+    marketCapBreakdown: [
+      { cap: "Large Cap", weight: 91.8, limit: 100, status: "ok" },
+      { cap: "Mid Cap", weight: 4.8, limit: 20, status: "ok" },
+      { cap: "Small Cap", weight: 3.4, limit: 20, status: "ok" },
+    ],
+    riskMetrics: {
+      portfolioBeta: 0.92,
+      portfolioVolatility: 18.4,
+      correlationRisk: "Medium — Tech cluster (INFY/TCS) shows 0.78 correlation",
+      concentrationScore: 62,
+      liquidityScore: 94,
+      varOneDayPct: -2.14,
+      varFiveDayPct: -4.82,
+    },
+    topCorrelatedPairs: [
+      { pair: "INFY / TCS", correlation: 0.78, risk: "High" },
+      { pair: "HDFCBANK / KOTAKBANK", correlation: 0.71, risk: "Medium" },
+      { pair: "BAJFINANCE / HDFCBANK", correlation: 0.64, risk: "Medium" },
     ],
   });
 });
 
-router.get("/risk", (req, res) => {
+// ── GET /portfolio/broker-snapshots ───────────────────────────────────────
+router.get("/broker-snapshots", (_req: Request, res: Response) => {
+  res.json([
+    { broker: "Zerodha", holdingsCount: 8, portfolioValue: 3628526.5, cashBalance: 86420, lastSync: "2025-07-14T09:30:00Z", status: "connected", dataSource: "DEMO" },
+    { broker: "HDFC Securities", holdingsCount: 4, portfolioValue: 1024513.2, cashBalance: 41800, lastSync: "2025-07-14T09:15:00Z", status: "demo", dataSource: "DEMO" },
+  ]);
+});
+
+// ── GET /portfolio/recommendation-history ─────────────────────────────────
+router.get("/recommendation-history", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.json({
+      entries: DEMO_HISTORY,
+      isDemo: true,
+      message: "Sign in to view your personal decision journal",
+    });
+    return;
+  }
+
+  const dbEntries = await db
+    .select()
+    .from(decisionJournalTable)
+    .where(eq(decisionJournalTable.userId, req.user.id));
+
+  if (dbEntries.length === 0) {
+    res.json({ entries: DEMO_HISTORY, isDemo: true, message: "No journal entries yet — your first entries will appear here" });
+    return;
+  }
+
+  res.json({ entries: dbEntries, isDemo: false });
+});
+
+const DEMO_HISTORY = [
+  { id: 1, ticker: "INFY", name: "Infosys", action: "ADD", date: "2025-06-14", rationale: "Strong deal pipeline — FY26 guidance upgrade likely after Q1 beat", outcome: "win", pnl: "+₹28,400", learnings: "Guided by fundamentals, not sentiment" },
+  { id: 2, ticker: "ASIANPAINT", name: "Asian Paints", action: "HOLD", date: "2025-05-22", rationale: "Weak quarter but thesis intact long-term. Birla Opus competition being priced in.", outcome: "neutral", pnl: "N/A", learnings: "Should have trimmed on thesis weakening earlier" },
+  { id: 3, ticker: "BAJFINANCE", name: "Bajaj Finance", action: "TRIM", date: "2025-04-08", rationale: "NIM guidance cut + macro headwind. Reduced from 15% to 13% allocation.", outcome: "win", pnl: "+₹12,200", learnings: "Act early on thesis change, not after big drawdown" },
+  { id: 4, ticker: "POLYCAB", name: "Polycab India", action: "WATCH", date: "2025-03-19", rationale: "Strong infra capex play. Waiting for post-election clarity before entry.", outcome: "N/A", pnl: "N/A", learnings: "" },
+  { id: 5, ticker: "MARUTI", name: "Maruti Suzuki", action: "BUY", date: "2025-01-12", rationale: "Volume recovery + EV transition less threatening than feared. Initiating.", outcome: "win", pnl: "+₹31,800", learnings: "Good entry on sector fear = Alpha" },
+];
+
+// ── POST /portfolio/recommendation-history (decision journal) ──────────────
+router.post("/recommendation-history", async (req: Request, res: Response) => {
+  const { ticker, name, action, date, rationale, outcome, pnl, learnings } = req.body;
+
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Sign in to save journal entries" });
+    return;
+  }
+
+  const [entry] = await db
+    .insert(decisionJournalTable)
+    .values({ userId: req.user.id, ticker, name, action, date: date ?? new Date().toISOString().split("T")[0], rationale, outcome, pnl, learnings })
+    .returning();
+
+  res.status(201).json(entry);
+});
+
+// ── GET /portfolio/position-sizing ────────────────────────────────────────
+router.get("/position-sizing", (_req: Request, res: Response) => {
   res.json({
-    concentrationRisk: "medium",
-    topHoldingsConcentration: 42.3,
-    sectorConcentration: [
-      { sector: "Banking & Finance", weight: 28.4, herfindahlIndex: 0.124 },
-      { sector: "Technology", weight: 22.1, herfindahlIndex: 0.089 },
-      { sector: "Consumer", weight: 16.8, herfindahlIndex: 0.072 },
-      { sector: "Energy", weight: 12.3, herfindahlIndex: 0.051 },
-      { sector: "Auto", weight: 9.1, herfindahlIndex: 0.038 },
-      { sector: "Pharma", weight: 4.2, herfindahlIndex: 0.018 },
-      { sector: "Chemicals", weight: 4.8, herfindahlIndex: 0.021 },
+    dataSource: "DEMO — sizing suggestions based on demo portfolio",
+    suggestions: [
+      { ticker: "INFY", name: "Infosys", currentWeight: 15.17, idealWeight: 15.0, action: "Hold", conviction: "high", upsidePct: 14.8, safetyMarginPct: 22.4, riskRewardRatio: 2.8, comment: "At ideal weight. Hold." },
+      { ticker: "ASIANPAINT", name: "Asian Paints", currentWeight: 11.53, idealWeight: 8.0, action: "Trim 3%", conviction: "medium", upsidePct: 38.0, safetyMarginPct: 9.4, riskRewardRatio: 1.2, comment: "Conviction downgraded. Trim to 8%." },
+      { ticker: "BAJFINANCE", name: "Bajaj Finance", currentWeight: 13.41, idealWeight: 11.0, action: "Trim 2%", conviction: "high", upsidePct: 22.8, safetyMarginPct: 10.5, riskRewardRatio: 2.1, comment: "Thesis weakening. Slight trim prudent." },
+      { ticker: "KOTAKBANK", name: "Kotak Mahindra Bank", currentWeight: 7.45, idealWeight: 9.0, action: "Add 1.5%", conviction: "medium", upsidePct: 5.6, safetyMarginPct: 15.5, riskRewardRatio: 1.8, comment: "Embargo lifted. Gradual add on dips." },
+      { ticker: "POLYCAB", name: "Polycab India (Watch)", currentWeight: 0.0, idealWeight: 3.0, action: "Initiate", conviction: "high", upsidePct: 28.4, safetyMarginPct: 18.2, riskRewardRatio: 3.2, comment: "New entry candidate. Complete research first." },
     ],
-    correlationMatrix: [
-      { ticker1: "HDFCBANK", ticker2: "KOTAKBANK", correlation: 0.82 },
-      { ticker1: "HDFCBANK", ticker2: "BAJFINANCE", correlation: 0.74 },
-      { ticker1: "INFY", ticker2: "TCS", correlation: 0.88 },
-      { ticker1: "RELIANCE", ticker2: "HDFCBANK", correlation: 0.41 },
-      { ticker1: "ASIANPAINT", ticker2: "PIDILITIND", correlation: 0.64 },
-      { ticker1: "TITAN", ticker2: "DMART", correlation: 0.52 },
-      { ticker1: "MARUTI", ticker2: "RELIANCE", correlation: 0.38 },
-      { ticker1: "SUNPHARMA", ticker2: "INFY", correlation: 0.22 },
-      { ticker1: "INFY", ticker2: "RELIANCE", correlation: 0.34 },
-      { ticker1: "BAJFINANCE", ticker2: "TITAN", correlation: 0.48 },
-    ],
-    stressTests: [
-      { scenario: "India Rate Shock (+100bps)", portfolioImpactPct: -8.4, description: "Simulates RBI emergency hike scenario; financials and rate-sensitive sectors worst hit" },
-      { scenario: "Global Recession (-20% EMs)", portfolioImpactPct: -14.2, description: "Emerging market selloff triggered by US/Europe recession; FII outflows assumed ₹50,000 Cr" },
-      { scenario: "INR Depreciation (₹95/USD)", portfolioImpactPct: -6.8, description: "Sharp rupee fall; import-heavy sectors (consumer, auto) impacted; IT exporters benefit partially" },
-      { scenario: "FII Mega Selloff (₹1L Cr)", portfolioImpactPct: -11.6, description: "Sustained FII exit driven by global risk-off; liquidity premium expands" },
-      { scenario: "IT Sector Correction (-25%)", portfolioImpactPct: -5.4, description: "Tech-specific slowdown from US spending cuts; INFY and TCS positions heavily exposed" },
-      { scenario: "Banking Credit Crisis", portfolioImpactPct: -12.8, description: "Systemic NPA shock; financial sector allocation of 28% creates concentration risk" },
-    ],
-    var95: 2.84,
-    var99: 4.12,
   });
-});
-
-router.get("/broker-snapshots", (req, res) => {
-  res.json([
-    {
-      broker: "Zerodha",
-      accountId: "ZR4829****",
-      totalValue: 37_24_820,
-      cashBalance: 8_42_000,
-      holdingsCount: 8,
-      lastSynced: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      status: "synced",
-      discrepancies: 0,
-    },
-    {
-      broker: "HDFC Securities",
-      accountId: "HDFC28****",
-      totalValue: 14_82_000,
-      cashBalance: 4_08_000,
-      holdingsCount: 4,
-      lastSynced: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      status: "stale",
-      discrepancies: 1,
-    },
-  ]);
-});
-
-router.get("/recommendation-history", (req, res) => {
-  res.json([
-    { id: "rec-1", ticker: "INFY", name: "Infosys", action: "buy", date: "2021-05-18", price: 1456.8, rationale: "Deal wins accelerating; margin expansion thesis intact. Valuation at 22x FY22E PE reasonable.", outcome: "successful", convictionAtTime: "high", returnSinceRecommendation: 19.61 },
-    { id: "rec-2", ticker: "SUNPHARMA", name: "Sun Pharma", action: "buy", date: "2021-11-20", price: 1148.6, rationale: "US specialty business re-rating; Halol resolution removes overhang.", outcome: "successful", convictionAtTime: "high", returnSinceRecommendation: 41.77 },
-    { id: "rec-3", ticker: "ZOMATO", name: "Zomato", action: "sell", date: "2022-03-08", price: 84.4, rationale: "Unit economics deteriorating; cash burn unsustainable at scale. Exit position.", outcome: "unsuccessful", convictionAtTime: "low", returnSinceRecommendation: -194.6 },
-    { id: "rec-4", ticker: "KOTAKBANK", name: "Kotak Mahindra Bank", action: "buy", date: "2023-02-07", price: 1742.3, rationale: "Stable asset quality, low NPA cycle, conservative book. Discount to HDFC Bank unjustified.", outcome: "pending", convictionAtTime: "medium", returnSinceRecommendation: 8.63 },
-    { id: "rec-5", ticker: "BAJFINANCE", name: "Bajaj Finance", action: "add", date: "2023-08-14", price: 7980.0, rationale: "Dip below 8000 — added second tranche. Long-term NBFC leader.", outcome: "unsuccessful", convictionAtTime: "high", returnSinceRecommendation: -14.4 },
-    { id: "rec-6", ticker: "ASIANPAINT", name: "Asian Paints", action: "trim", date: "2024-04-22", price: 3284.0, rationale: "Position at 10% — above ideal weight. Trim to 8%. Valuation stretched at 55x.", outcome: "successful", convictionAtTime: "medium", returnSinceRecommendation: 9.74 },
-    { id: "rec-7", ticker: "PIDILITIND", name: "Pidilite Industries", action: "buy", date: "2022-04-08", price: 2248.5, rationale: "Construction boom + brand moat in adhesives. Rural penetration story intact.", outcome: "successful", convictionAtTime: "high", returnSinceRecommendation: 14.76 },
-  ]);
-});
-
-router.get("/position-sizing", (req, res) => {
-  res.json([
-    { ticker: "INFY", name: "Infosys", currentWeight: 15.17, idealWeight: 15.0, currentValue: 731850, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [{ price: 2000, quantityPct: 25, notes: "1st trim at ₹2000 — approaching valuation fair value" }, { price: 2300, quantityPct: 40, notes: "Major trim at ₹2300 — approaching target" }] },
-    { ticker: "BAJFINANCE", name: "Bajaj Finance", currentWeight: 13.45, idealWeight: 10.0, currentValue: 648897.5, suggestedAction: "trim", stagedEntryLevels: [], trimLevels: [{ price: 7000, quantityPct: 20, notes: "Trim 20% — conviction lowered; reduce overweight" }, { price: 7500, quantityPct: 30, notes: "Trim more if thesis doesn't recover" }] },
-    { ticker: "RELIANCE", name: "Reliance Industries", currentWeight: 12.39, idealWeight: 12.0, currentValue: 597933, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [{ price: 3200, quantityPct: 15, notes: "Small trim at target zone" }] },
-    { ticker: "HDFCBANK", name: "HDFC Bank", currentWeight: 11.74, idealWeight: 12.0, currentValue: 566562.5, suggestedAction: "add", stagedEntryLevels: [{ price: 1580, quantityPct: 50, notes: "Add 15 shares at ₹1580 — core holding below ideal weight" }], trimLevels: [] },
-    { ticker: "SUNPHARMA", name: "Sun Pharma", currentWeight: 4.22, idealWeight: 6.0, currentValue: 203550, suggestedAction: "add", stagedEntryLevels: [{ price: 1600, quantityPct: 50, notes: "Stage 1: Add 40 shares at ₹1600" }, { price: 1520, quantityPct: 50, notes: "Stage 2: Add another 40 shares on dip to ₹1520" }], trimLevels: [] },
-    { ticker: "KOTAKBANK", name: "Kotak Mahindra Bank", currentWeight: 7.26, idealWeight: 8.0, currentValue: 350131, suggestedAction: "add", stagedEntryLevels: [{ price: 1850, quantityPct: 100, notes: "Add 25 shares at ₹1850 — await credit growth recovery confirmation" }], trimLevels: [] },
-    { ticker: "DMART", name: "Avenue Supermarts", currentWeight: 10.77, idealWeight: 9.0, currentValue: 519706, suggestedAction: "trim", stagedEntryLevels: [], trimLevels: [{ price: 4850, quantityPct: 20, notes: "Trim 22 shares — above ideal weight cap" }] },
-    { ticker: "ASIANPAINT", name: "Asian Paints", currentWeight: 7.99, idealWeight: 7.0, currentValue: 385359, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [{ price: 3100, quantityPct: 30, notes: "Trim if conviction weakens further" }] },
-    { ticker: "TITAN", name: "Titan Company", currentWeight: 9.66, idealWeight: 9.0, currentValue: 466146, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [{ price: 3800, quantityPct: 20, notes: "Light trim near target" }] },
-    { ticker: "MARUTI", name: "Maruti Suzuki", currentWeight: 9.12, idealWeight: 9.0, currentValue: 440265, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [] },
-    { ticker: "TCS", name: "TCS", currentWeight: 6.32, idealWeight: 7.0, currentValue: 304992, suggestedAction: "add", stagedEntryLevels: [{ price: 3700, quantityPct: 100, notes: "Add 10 shares if dips below ₹3700" }], trimLevels: [] },
-    { ticker: "PIDILITIND", name: "Pidilite Industries", currentWeight: 4.81, idealWeight: 5.0, currentValue: 232227, suggestedAction: "hold", stagedEntryLevels: [], trimLevels: [] },
-  ]);
 });
 
 export default router;

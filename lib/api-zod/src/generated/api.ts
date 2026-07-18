@@ -9,6 +9,240 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Get the currently authenticated user
+ */
+export const GetCurrentAuthUserHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const GetCurrentAuthUserResponse = zod.object({
+  "user": zod.union([zod.object({
+  "id": zod.string(),
+  "email": zod.string().nullable(),
+  "firstName": zod.string().nullable(),
+  "lastName": zod.string().nullable(),
+  "profileImageUrl": zod.string().nullable()
+}),zod.null()])
+})
+
+
+/**
+ * @summary Start the browser OIDC login flow
+ */
+export const BeginBrowserLoginQueryParams = zod.object({
+  "returnTo": zod.coerce.string().optional()
+})
+
+export const BeginBrowserLoginResponse = zod.void()
+
+
+/**
+ * @summary Complete the browser OIDC login flow
+ */
+export const HandleBrowserLoginCallbackResponse = zod.void()
+
+
+/**
+ * @summary Clear session and begin OIDC logout
+ */
+export const LogoutBrowserSessionHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const LogoutBrowserSessionResponse = zod.void()
+
+
+/**
+ * @summary Exchange a mobile OIDC code for a session token
+ */
+
+
+
+
+
+
+
+export const ExchangeMobileAuthorizationCodeBody = zod.object({
+  "code": zod.string().min(1),
+  "code_verifier": zod.string().min(1),
+  "redirect_uri": zod.string().min(1),
+  "state": zod.string().min(1),
+  "nonce": zod.string().min(1).optional()
+})
+
+export const ExchangeMobileAuthorizationCodeResponse = zod.object({
+  "token": zod.string()
+})
+
+
+/**
+ * @summary Delete a mobile session token
+ */
+export const LogoutMobileSessionHeader = zod.object({
+  "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')
+})
+
+export const LogoutMobileSessionResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Get guardrail configuration
+ */
+export const GetGuardrailSettingsResponse = zod.object({
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "isDefault": zod.boolean()
+})
+
+
+/**
+ * @summary Update guardrail configuration
+ */
+export const UpdateGuardrailSettingsBody = zod.record(zod.string(), zod.unknown()).describe('Partial guardrail settings update')
+
+export const UpdateGuardrailSettingsResponse = zod.object({
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "isDefault": zod.boolean()
+})
+
+
+/**
+ * @summary Run Guardian Mode check on a proposed action
+ */
+export const CheckGuardrailsBody = zod.object({
+  "action": zod.enum(['buy', 'sell', 'add', 'trim', 'exit', 'review']).optional(),
+  "ticker": zod.string().optional(),
+  "name": zod.string().nullish(),
+  "suggestedQuantity": zod.number().nullish(),
+  "suggestedPrice": zod.number().nullish(),
+  "rationale": zod.string().nullish(),
+  "investmentHorizon": zod.string().nullish(),
+  "bearCase": zod.string().nullish(),
+  "targetPrice": zod.number().nullish(),
+  "thesisInvalidation": zod.string().nullish(),
+  "maxAcceptableLossPct": zod.number().nullish(),
+  "exitConditions": zod.string().nullish(),
+  "currentAllocationPct": zod.number().nullish(),
+  "sectorAllocationPct": zod.number().nullish(),
+  "isSmallCap": zod.boolean().nullish()
+})
+
+export const CheckGuardrailsResponse = zod.object({
+  "checkId": zod.string(),
+  "decision": zod.enum(['approve', 'approve_with_warnings', 'require_evidence', 'reject']),
+  "severity": zod.enum(['low', 'medium', 'high', 'critical']),
+  "summary": zod.string(),
+  "hardRuleBreaches": zod.array(zod.object({
+  "ruleId": zod.string(),
+  "ruleName": zod.string(),
+  "currentValue": zod.number().nullish(),
+  "threshold": zod.number().nullish(),
+  "message": zod.string(),
+  "severity": zod.string()
+})),
+  "softRuleWarnings": zod.array(zod.object({
+  "ruleId": zod.string(),
+  "ruleName": zod.string(),
+  "currentValue": zod.number().nullish(),
+  "threshold": zod.number().nullish(),
+  "message": zod.string(),
+  "severity": zod.string()
+})),
+  "preTradeFailures": zod.array(zod.object({
+  "field": zod.string(),
+  "message": zod.string()
+})),
+  "biasFlags": zod.array(zod.object({
+  "bias": zod.string(),
+  "detected": zod.boolean(),
+  "description": zod.string(),
+  "severity": zod.string()
+})),
+  "stressTestResults": zod.array(zod.object({
+  "scenario": zod.string(),
+  "portfolioImpactPct": zod.number(),
+  "positionImpactPct": zod.number(),
+  "severity": zod.string()
+})),
+  "researchCompletenessScore": zod.number(),
+  "researchCompletenessBreakdown": zod.record(zod.string(), zod.unknown()).optional(),
+  "passedChecks": zod.array(zod.string()),
+  "requiresOverride": zod.boolean(),
+  "canOverride": zod.boolean(),
+  "timestamp": zod.string()
+})
+
+
+/**
+ * @summary Log execution of a checked action (with optional override)
+ */
+export const ExecuteWithGuardrailsBody = zod.object({
+  "checkId": zod.string(),
+  "action": zod.string(),
+  "ticker": zod.string(),
+  "name": zod.string().nullish(),
+  "overrideRationale": zod.string().nullish(),
+  "userConfirmed": zod.boolean()
+})
+
+export const ExecuteWithGuardrailsResponse = zod.object({
+  "success": zod.boolean(),
+  "auditId": zod.number().optional(),
+  "isOverride": zod.boolean()
+})
+
+
+/**
+ * @summary Get audit trail of all Guardian Mode reviews
+ */
+export const GetGuardrailAuditTrailResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "checkId": zod.string().nullish(),
+  "ticker": zod.string(),
+  "name": zod.string().nullish(),
+  "action": zod.string(),
+  "guardianDecision": zod.string(),
+  "severity": zod.string().nullish(),
+  "breachedRules": zod.array(zod.string()).optional(),
+  "biasFlags": zod.array(zod.string()).optional(),
+  "preTradeFailures": zod.array(zod.string()).optional(),
+  "researchCompletenessScore": zod.number().optional(),
+  "isOverride": zod.boolean(),
+  "overrideRationale": zod.string().nullish(),
+  "finalAction": zod.string().nullable(),
+  "createdAt": zod.string()
+})),
+  "isDemo": zod.boolean(),
+  "message": zod.string().nullish()
+})
+
+
+/**
+ * @summary Get portfolio health score
+ */
+export const GetPortfolioHealthResponse = zod.object({
+  "score": zod.number(),
+  "band": zod.string(),
+  "components": zod.array(zod.object({
+  "name": zod.string(),
+  "score": zod.number(),
+  "maxScore": zod.number(),
+  "description": zod.string()
+})),
+  "activeAlertCount": zod.number(),
+  "thesisBrokenCount": zod.number().optional(),
+  "thesisWeakeningCount": zod.number().optional(),
+  "topRisks": zod.array(zod.string()),
+  "cashBufferPct": zod.number().optional(),
+  "cashBufferBelowLimit": zod.boolean().optional(),
+  "lastCalculated": zod.string(),
+  "dataSource": zod.string().optional()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
