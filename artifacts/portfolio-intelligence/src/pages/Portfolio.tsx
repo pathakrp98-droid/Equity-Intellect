@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useGetHoldings, useGetWatchlist, useGetBrokerSnapshots, useGetRiskDashboard, useGetPositionSizing, useGetPerformance, useGetRecommendationHistory } from '@workspace/api-client-react';
+import { useGetHoldings, useGetWatchlist, useGetBrokerSnapshots, useGetRiskDashboard, useGetPositionSizing, useGetPerformance, useGetRecommendationHistory, useRemoveFromWatchlist } from '@workspace/api-client-react';
+import { useLocation } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatPercent } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { AlertCircle, ArrowDownIcon, ArrowUpIcon, TrendingUp, ShieldAlert, Target, Info, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, ArrowDownIcon, ArrowUpIcon, TrendingUp, ShieldAlert, Target, Info, CheckCircle2, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export function Portfolio() {
@@ -63,12 +64,13 @@ export function Portfolio() {
 
 function HoldingsTable() {
   const { data: holdings, isLoading } = useGetHoldings();
+  const [, navigate] = useLocation();
 
   if (isLoading) return <div className="p-6 space-y-4">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>;
 
   return (
     <div className="overflow-auto w-full flex-1">
-      <table className="w-full text-sm text-left">
+      <table className="w-full text-sm text-left min-w-[1200px]">
         <thead className="text-xs text-muted-foreground bg-secondary/50 sticky top-0 z-10 backdrop-blur-md">
           <tr>
             <th className="px-4 py-3 font-semibold w-[200px]">Asset</th>
@@ -85,7 +87,7 @@ function HoldingsTable() {
         </thead>
         <tbody className="divide-y divide-border/50">
           {holdings?.map((h) => (
-            <tr key={h.ticker} className="hover:bg-muted/30 transition-colors cursor-pointer group">
+            <tr key={h.ticker} className="cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => navigate(`/research?ticker=${h.ticker}`)}>
               <td className="px-4 py-3">
                 <div className="font-bold text-foreground">{h.ticker}</div>
                 <div className="text-xs text-muted-foreground truncate">{h.name}</div>
@@ -151,6 +153,8 @@ function HoldingsTable() {
 
 function WatchlistTable() {
   const { data: watchlist, isLoading } = useGetWatchlist();
+  const removeMutation = useRemoveFromWatchlist();
+  const [, navigate] = useLocation();
   if (isLoading) return <Skeleton className="h-64 w-full" />;
 
   return (
@@ -165,13 +169,14 @@ function WatchlistTable() {
             <th className="px-4 py-3 font-semibold text-right">Distance to Entry</th>
             <th className="px-4 py-3 font-semibold text-center">Conviction</th>
             <th className="px-4 py-3 font-semibold">Notes</th>
+            <th className="px-4 py-3 font-semibold text-center w-[60px]"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/50">
           {watchlist?.map(w => {
             const distance = w.targetEntryPrice ? ((w.ltp - w.targetEntryPrice) / w.targetEntryPrice * 100) : null;
             return (
-              <tr key={w.ticker}>
+              <tr key={w.ticker} className="cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => navigate(`/research?ticker=${w.ticker}`)}>
                 <td className="px-4 py-3">
                   <div className="font-bold">{w.ticker}</div>
                   <div className="text-xs text-muted-foreground">{w.name}</div>
@@ -197,6 +202,15 @@ function WatchlistTable() {
                   </span>
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">{w.notes}</td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    className="p-1 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-colors"
+                    onClick={e => { e.stopPropagation(); removeMutation.mutate({ ticker: w.ticker }); }}
+                    title="Remove from watchlist"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </td>
               </tr>
             )
           })}

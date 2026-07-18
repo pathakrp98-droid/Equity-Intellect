@@ -78,7 +78,7 @@ function VolumeScanner() {
             <tr key={row.ticker} className="hover:bg-muted/30">
               <td className="px-6 py-4 font-bold">{row.ticker}</td>
               <td className="px-6 py-4 text-right font-mono">₹{row.ltp.toLocaleString()}</td>
-              <td className="px-6 py-4 text-right font-mono text-emerald-500">+{row.dayChangePct.toFixed(2)}%</td>
+              <td className={cn("px-6 py-4 text-right font-mono", row.dayChangePct >= 0 ? "text-emerald-500" : "text-destructive")}>{row.dayChangePct >= 0 ? '+' : ''}{row.dayChangePct.toFixed(2)}%</td>
               <td className="px-6 py-4 text-right font-mono font-bold text-primary">{row.volumeRatio}x</td>
               <td className="px-6 py-4 text-right font-mono">{row.deliveryPct}%</td>
               <td className="px-6 py-4 text-center">

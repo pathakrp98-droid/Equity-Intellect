@@ -10,7 +10,8 @@ import {
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
-  TriangleAlert
+  TriangleAlert,
+  Shield
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGetDashboardAlerts } from '@workspace/api-client-react';
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: '/market', label: 'Market Intelligence', icon: Globe2 },
   { href: '/copilot', label: 'AI Copilot', icon: Bot },
   { href: '/alerts', label: 'Alerts', icon: Bell, badge: true },
+  { href: '/guardrails', label: 'Guardrails', icon: Shield },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -42,7 +44,7 @@ export function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCo
         {!collapsed && (
           <span className="text-lg font-bold tracking-tight font-mono text-primary flex items-center gap-2">
             <div className="w-6 h-6 bg-primary rounded text-primary-foreground flex items-center justify-center text-xs font-black">PI</div>
-            Terminal
+            AlphaDesk AI
           </span>
         )}
         {collapsed && (

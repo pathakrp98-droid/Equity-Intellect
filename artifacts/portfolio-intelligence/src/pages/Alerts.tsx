@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGetAlerts, useDismissAlert, useGetAlertSettings, useUpdateAlertSettings } from '@workspace/api-client-react';
+import { useLocation } from 'wouter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';

@@ -1,15 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useGetResearchCompanies, useGetCompanyDetail } from '@workspace/api-client-react';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, SlidersHorizontal, ArrowUpRight, TrendingUp, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useLocation } from 'wouter';
 
 export function Research() {
   const { data: companies, isLoading: loadingList } = useGetResearchCompanies();
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [location] = useLocation();
+  const urlTicker = new URLSearchParams(window.location.search).get('ticker');
 
   const filteredCompanies = useMemo(() => {
     if (!companies) return [];
@@ -20,10 +23,13 @@ export function Research() {
     );
   }, [companies, search]);
 
-  // Select first company by default when loaded
-  if (!selectedTicker && filteredCompanies.length > 0) {
-    setSelectedTicker(filteredCompanies[0].ticker);
-  }
+  useEffect(() => {
+    if (urlTicker && companies?.some(c => c.ticker === urlTicker.toUpperCase())) {
+      setSelectedTicker(urlTicker.toUpperCase());
+    } else if (!selectedTicker && filteredCompanies.length > 0) {
+      setSelectedTicker(filteredCompanies[0].ticker);
+    }
+  }, [urlTicker, companies]);
 
   return (
     <div className="flex h-[calc(100vh-6rem)] gap-6 overflow-hidden">
@@ -115,7 +121,14 @@ function CompanyDetailView({ ticker }: { ticker: string }) {
     );
   }
 
-  if (!detail) return null;
+  if (!detail) return (
+    <div className="flex-1 flex items-center justify-center text-muted-foreground flex-col gap-2">
+      <p className="text-sm font-medium">Company data not available</p>
+      <p className="text-xs">Research profile pending for this ticker</p>
+    </div>
+  );
+
+  const hasValidValuation = detail.valuation.bull > 0 && detail.valuation.bear > 0 && detail.valuation.base > 0;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -174,46 +187,54 @@ function CompanyDetailView({ ticker }: { ticker: string }) {
 
           <div className="border rounded-lg p-5 bg-card shadow-sm">
             <h3 className="font-semibold text-lg mb-4">Valuation Framework</h3>
-            <div className="space-y-6">
-              <div className="flex justify-between items-end">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">{detail.valuation.methodology}</span>
-                <span className="text-2xl font-mono font-bold text-primary">₹{detail.valuation.base.toLocaleString()}</span>
+            {!hasValidValuation ? (
+              <div className="p-6 text-center text-muted-foreground">
+                <p className="text-sm">Valuation research pending</p>
               </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex justify-between items-end">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">{detail.valuation.methodology}</span>
+                  <span className="text-2xl font-mono font-bold text-primary">₹{detail.valuation.base.toLocaleString()}</span>
+                </div>
 
-              {/* Valuation Bar */}
-              <div className="relative pt-6 pb-8">
-                <div className="w-full h-2 bg-secondary rounded-full relative">
-                  {/* Current Price Marker */}
-                  <div 
-                    className="absolute w-3 h-3 rounded-full bg-white border-2 border-primary top-1/2 -translate-y-1/2 z-10 -ml-1.5"
-                    style={{ left: `${Math.max(0, Math.min(100, (detail.ltp - detail.valuation.bear) / (detail.valuation.bull - detail.valuation.bear) * 100))}%` }}
-                  >
-                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono whitespace-nowrap">LTP ₹{detail.ltp}</div>
-                  </div>
-                  
-                  {/* Bear Marker */}
-                  <div className="absolute w-1 h-3 bg-destructive top-1/2 -translate-y-1/2 left-0">
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-destructive">₹{detail.valuation.bear}</div>
-                  </div>
-                  
-                  {/* Bull Marker */}
-                  <div className="absolute w-1 h-3 bg-emerald-500 top-1/2 -translate-y-1/2 right-0">
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-emerald-500">₹{detail.valuation.bull}</div>
+                {/* Valuation Bar */}
+                <div className="relative pt-6 pb-8">
+                  <div className="w-full h-2 bg-secondary rounded-full relative">
+                    {/* Current Price Marker */}
+                    <div 
+                      className="absolute w-3 h-3 rounded-full bg-white border-2 border-primary top-1/2 -translate-y-1/2 z-10 -ml-1.5"
+                      style={{ left: `${Math.max(0, Math.min(100, (detail.ltp - detail.valuation.bear) / (detail.valuation.bull - detail.valuation.bear) * 100))}%` }}
+                    >
+                      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono whitespace-nowrap">LTP ₹{detail.ltp}</div>
+                    </div>
+                    
+                    {/* Bear Marker */}
+                    <div className="absolute w-1 h-3 bg-destructive top-1/2 -translate-y-1/2 left-0">
+                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-destructive">₹{detail.valuation.bear}</div>
+                    </div>
+                    
+                    {/* Bull Marker */}
+                    <div className="absolute w-1 h-3 bg-emerald-500 top-1/2 -translate-y-1/2 right-0">
+                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-emerald-500">₹{detail.valuation.bull}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="border border-emerald-500/20 bg-emerald-500/5 p-3 rounded text-center">
-                  <span className="block text-xs text-muted-foreground mb-1">Upside to Base</span>
-                  <span className="font-mono font-bold text-emerald-500">+{((detail.valuation.base - detail.ltp) / detail.ltp * 100).toFixed(1)}%</span>
-                </div>
-                <div className="border border-destructive/20 bg-destructive/5 p-3 rounded text-center">
-                  <span className="block text-xs text-muted-foreground mb-1">Downside to Bear</span>
-                  <span className="font-mono font-bold text-destructive">{((detail.valuation.bear - detail.ltp) / detail.ltp * 100).toFixed(1)}%</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="border border-emerald-500/20 bg-emerald-500/5 p-3 rounded text-center">
+                    <span className="block text-xs text-muted-foreground mb-1">Upside to Base</span>
+                    <span className="font-mono font-bold text-emerald-500">
+                      {((detail.valuation.base - detail.ltp) / detail.ltp * 100) >= 0 ? '+' : ''}{((detail.valuation.base - detail.ltp) / detail.ltp * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="border border-destructive/20 bg-destructive/5 p-3 rounded text-center">
+                    <span className="block text-xs text-muted-foreground mb-1">Downside to Bear</span>
+                    <span className="font-mono font-bold text-destructive">{((detail.valuation.bear - detail.ltp) / detail.ltp * 100).toFixed(1)}%</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -303,7 +324,7 @@ function CompanyDetailView({ ticker }: { ticker: string }) {
 
 function Target({ className }: { className?: string }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinelinejoin="round" className={className}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <circle cx="12" cy="12" r="10"/>
       <circle cx="12" cy="12" r="6"/>
       <circle cx="12" cy="12" r="2"/>

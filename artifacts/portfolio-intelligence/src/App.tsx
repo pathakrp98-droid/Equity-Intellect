@@ -12,6 +12,7 @@ import { Market } from './pages/Market';
 import { Copilot } from './pages/Copilot';
 import { Alerts } from './pages/Alerts';
 import { Settings } from './pages/Settings';
+import { Guardrails } from './pages/Guardrails';
 
 const queryClient = new QueryClient();
 
@@ -26,6 +27,7 @@ function Router() {
         <Route path="/copilot" component={Copilot} />
         <Route path="/alerts" component={Alerts} />
         <Route path="/settings" component={Settings} />
+        <Route path="/guardrails" component={Guardrails} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
