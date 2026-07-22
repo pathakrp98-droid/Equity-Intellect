@@ -167,7 +167,7 @@ function uniqueTextList(value: unknown, maximum = 20): string[] {
 function sourceList(value: unknown): JournalSourceReference[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((item, index) => {
+    .map<JournalSourceReference | null>((item, index) => {
       if (!item || typeof item !== "object") return null;
       const row = item as Record<string, unknown>;
       const label = cleanText(row.label, 250);

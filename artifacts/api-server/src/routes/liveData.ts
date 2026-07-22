@@ -35,8 +35,9 @@ function authenticated(handler: AuthenticatedHandler) {
   };
 }
 
-function numberParam(value: string): number {
-  const parsed = Number(value);
+function numberParam(value: unknown): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error("id must be a positive integer");
   }

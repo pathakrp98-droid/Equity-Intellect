@@ -321,7 +321,7 @@ function PerformanceTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'XIRR', value: `${perf?.xirr.toFixed(1)}%`, highlight: true },
-          { label: 'Alpha vs Nifty', value: `${perf?.alpha > 0 ? '+' : ''}${perf?.alpha.toFixed(1)}%`, highlight: perf?.alpha && perf.alpha > 0 },
+          { label: 'Alpha vs Nifty', value: `${(perf?.alpha ?? 0) > 0 ? '+' : ''}${(perf?.alpha ?? 0).toFixed(1)}%`, highlight: (perf?.alpha ?? 0) > 0 },
           { label: 'Sharpe Ratio', value: perf?.sharpeRatio.toFixed(2), highlight: false },
           { label: 'Max Drawdown', value: `${perf?.maxDrawdown.toFixed(1)}%`, highlight: false, danger: true },
         ].map((m, i) => (

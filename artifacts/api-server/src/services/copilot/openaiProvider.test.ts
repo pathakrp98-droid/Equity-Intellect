@@ -63,10 +63,13 @@ test("uses the Responses API with non-persistent structured output", async () =>
     assert.equal(result.provider, "openai_responses");
     assert.equal(result.model, "test-model");
     assert.equal(result.answer.citations[0]?.sourceId, "S1");
-    assert.equal(requestBody?.store, false);
-    assert.equal(requestBody?.model, "test-model");
+    const capturedRequestBody =
+      requestBody as unknown as Record<string, unknown>;
+    assert.equal(capturedRequestBody.store, false);
+    assert.equal(capturedRequestBody.model, "test-model");
     assert.equal(
-      (requestBody?.text as { format?: { type?: string } })?.format?.type,
+      (capturedRequestBody.text as { format?: { type?: string } })?.format
+        ?.type,
       "json_schema",
     );
   } finally {

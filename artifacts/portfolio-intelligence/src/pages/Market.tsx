@@ -56,7 +56,7 @@ export function Market() {
 }
 
 function VolumeScanner() {
-  const { data, isLoading } = useGetVolumeScanner({ query: { queryKey: ['volumeScanner'] } });
+  const { data, isLoading } = useGetVolumeScanner(undefined, { query: { queryKey: ['volumeScanner'] } });
   
   if (isLoading) return <div className="p-6"><Skeleton className="h-[500px] w-full" /></div>;
 

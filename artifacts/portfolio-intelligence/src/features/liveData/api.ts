@@ -183,7 +183,7 @@ export function useDeleteSymbolMapping() {
 export function useRefreshLiveData() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (force = false) =>
+    mutationFn: (force: boolean) =>
       request<LiveDataRefreshResult>("/api/live-data/refresh", {
         method: "POST",
         body: JSON.stringify({ force }),

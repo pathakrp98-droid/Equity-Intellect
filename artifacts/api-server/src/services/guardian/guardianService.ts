@@ -9,6 +9,9 @@ import {
   marketDataPointsTable,
   marketNewsTable,
   type GuardrailSettingsData,
+  type GuardianDecisionPacketContext,
+  type GuardianDecisionPacketInput,
+  type GuardianDecisionPacketResult,
 } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -435,9 +438,11 @@ class GuardianService {
         checkId,
         ticker: proposal.ticker,
         action: proposal.action,
-        input: proposal,
-        contextSnapshot: context,
-        result,
+        input: proposal as GuardianDecisionPacketInput,
+        contextSnapshot:
+          context as unknown as GuardianDecisionPacketContext,
+        result:
+          result as unknown as GuardianDecisionPacketResult,
         status:
           result.decision === "approve" ||
           result.decision === "approve_with_warnings"

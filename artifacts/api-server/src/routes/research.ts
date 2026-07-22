@@ -102,6 +102,11 @@ function positiveId(value: unknown): number {
   return result;
 }
 
+function routeText(value: unknown, field: string): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return requiredText(raw, field);
+}
+
 function enumValue<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -358,7 +363,7 @@ router.post(
 router.get(
   "/companies/:ticker",
   authenticated(async (req, res, userId) => {
-    res.json(await researchService.getWorkspace(userId, req.params.ticker));
+    res.json(await researchService.getWorkspace(userId, routeText(req.params.ticker, "ticker")));
   }),
 );
 
@@ -368,7 +373,7 @@ router.patch(
     res.json(
       await researchService.updateCompany(
         userId,
-        req.params.ticker,
+        routeText(req.params.ticker, "ticker"),
         parseCompanyPatch(body(req)),
       ),
     );
@@ -381,7 +386,7 @@ router.put(
     res.json(
       await researchService.saveThesis(
         userId,
-        req.params.ticker,
+        routeText(req.params.ticker, "ticker"),
         parseThesis(body(req)),
       ),
     );
@@ -396,7 +401,7 @@ router.post(
       .json(
         await researchService.createNote(
           userId,
-          req.params.ticker,
+          routeText(req.params.ticker, "ticker"),
           parseNote(body(req)) as NoteInput,
         ),
       );
@@ -433,7 +438,7 @@ router.post(
       .json(
         await researchService.createCatalyst(
           userId,
-          req.params.ticker,
+          routeText(req.params.ticker, "ticker"),
           parseCatalyst(body(req)) as CatalystInput,
         ),
       );
@@ -470,7 +475,7 @@ router.post(
       .json(
         await researchService.createRisk(
           userId,
-          req.params.ticker,
+          routeText(req.params.ticker, "ticker"),
           parseRisk(body(req)) as RiskInput,
         ),
       );
@@ -507,7 +512,7 @@ router.post(
       .json(
         await researchService.createInvalidation(
           userId,
-          req.params.ticker,
+          routeText(req.params.ticker, "ticker"),
           parseInvalidation(body(req)) as InvalidationInput,
         ),
       );
@@ -547,7 +552,7 @@ router.post(
       .json(
         await researchService.createValuationAssumption(
           userId,
-          req.params.ticker,
+          routeText(req.params.ticker, "ticker"),
           parseAssumption(body(req)) as ValuationAssumptionInput,
         ),
       );
