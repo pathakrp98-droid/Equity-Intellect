@@ -25,12 +25,33 @@ export interface HoldingsCsvResult {
 }
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  symbol: ["symbol", "ticker", "trading symbol", "tradingsymbol", "scrip"],
+  symbol: [
+    "symbol",
+    "ticker",
+    "trading symbol",
+    "tradingsymbol",
+    "scrip",
+    "scrip name",
+    "scrip code",
+    "security symbol",
+    "stock symbol",
+    "instrument symbol",
+    "nse symbol",
+    "bse symbol",
+  ],
   isin: ["isin", "isin code", "security isin"],
   name: ["name", "company", "company name", "security name", "instrument"],
   exchange: ["exchange", "segment", "exchange segment"],
   sector: ["sector", "industry", "industry sector"],
-  quantity: ["quantity", "total quantity", "qty", "holding quantity"],
+  quantity: [
+    "quantity",
+    "total quantity",
+    "qty",
+    "holding quantity",
+    "net quantity",
+    "net qty",
+    "total qty",
+  ],
   availableQuantity: [
     "available quantity",
     "available qty",
@@ -41,6 +62,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "long term average price",
     "longterm average price",
     "long term avg price",
+    "lt average price",
+    "lt avg price",
+    "long term average cost",
     "average price",
     "avg price",
     "average cost",
@@ -52,6 +76,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "prev close",
     "closing price",
     "previous closing",
+    "prev closing price",
+    "previous day closing price",
+    "last closing price",
   ],
   reportedUnrealizedPnl: [
     "unrealized pnl",
@@ -59,6 +86,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "unrealized p l",
     "unrealised p l",
     "unrealized profit loss",
+    "unrealised profit loss",
+    "unrealized profit and loss",
+    "unrealised profit and loss",
   ],
   reportedUnrealizedPnlPct: [
     "unrealized pnl pct",
@@ -67,6 +97,10 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "unrealised pnl percent",
     "unrealized p l pct",
     "unrealised p l pct",
+    "unrealized profit loss pct",
+    "unrealised profit loss pct",
+    "unrealized profit and loss pct",
+    "unrealised profit and loss pct",
   ],
 };
 
@@ -75,6 +109,7 @@ function normalizeHeader(value: string): string {
     .trim()
     .toLowerCase()
     .replace(/\uFEFF/g, "")
+    .replace(/\u0000/g, "")
     .replace(/%/g, " pct ")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
@@ -83,13 +118,21 @@ function normalizeHeader(value: string): string {
 }
 
 function detectDelimiter(csv: string): string {
-  const firstLine = csv.split(/\r?\n/, 1)[0] ?? "";
+  const sampleLines = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 30);
   const candidates = [",", "\t", ";"];
-  return candidates.reduce((best, candidate) => {
-    const count = firstLine.split(candidate).length;
-    const bestCount = firstLine.split(best).length;
-    return count > bestCount ? candidate : best;
-  }, ",");
+  const score = (candidate: string) =>
+    sampleLines.reduce(
+      (best, line) => Math.max(best, line.split(candidate).length),
+      1,
+    );
+  return candidates.reduce(
+    (best, candidate) => (score(candidate) > score(best) ? candidate : best),
+    ",",
+  );
 }
 
 function parseRows(csv: string): string[][] {
@@ -187,8 +230,43 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
     throw new Error("CSV must contain a header and at least one holding row");
   }
 
-  const headers = rows[0].map(normalizeHeader);
-  for (const field of ["symbol", "averageCost", "previousClose"]) {
+  const headerIndex = rows
+    .slice(0, Math.min(rows.length, 30))
+    .findIndex((row) => {
+      const candidate = row.map(normalizeHeader);
+      const hasIdentifier =
+        resolveIndex(candidate, "symbol") >= 0 ||
+        resolveIndex(candidate, "isin") >= 0;
+      const hasQuantity =
+        resolveIndex(candidate, "quantity") >= 0 ||
+        resolveIndex(candidate, "availableQuantity") >= 0;
+      return (
+        hasIdentifier &&
+        hasQuantity &&
+        resolveIndex(candidate, "averageCost") >= 0 &&
+        resolveIndex(candidate, "previousClose") >= 0
+      );
+    });
+
+  if (headerIndex < 0) {
+    const detected = rows
+      .slice(0, 5)
+      .map((row) => row.map(normalizeHeader).filter(Boolean).join(" | "))
+      .filter(Boolean)
+      .join(" / ");
+    throw new Error(
+      `Could not find the holdings header row. Detected: ${detected || "no readable headers"}`,
+    );
+  }
+
+  const headers = rows[headerIndex].map(normalizeHeader);
+  if (
+    resolveIndex(headers, "symbol") < 0 &&
+    resolveIndex(headers, "isin") < 0
+  ) {
+    throw new Error("CSV requires Symbol or ISIN");
+  }
+  for (const field of ["averageCost", "previousClose"]) {
     if (resolveIndex(headers, field) < 0) {
       throw new Error(`CSV is missing a supported ${field} column`);
     }
@@ -205,14 +283,15 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
   const warnings: string[] = [];
   const seen = new Set<string>();
 
-  for (let index = 1; index < rows.length; index += 1) {
+  for (let index = headerIndex + 1; index < rows.length; index += 1) {
     const row = rows[index];
     const rowNumber = index + 1;
     try {
-      const symbol = String(getCell(row, headers, "symbol") ?? "")
+      const isin = getCell(row, headers, "isin")?.trim() || null;
+      const symbol = String(getCell(row, headers, "symbol") ?? isin ?? "")
         .trim()
         .toUpperCase();
-      if (!symbol) throw new Error("Symbol is required");
+      if (!symbol) throw new Error("Symbol or ISIN is required");
       if (seen.has(symbol)) {
         throw new Error(`Duplicate Symbol in CSV: ${symbol}`);
       }
@@ -275,7 +354,7 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
 
       holdings.push({
         symbol,
-        isin: getCell(row, headers, "isin") ?? null,
+        isin,
         name: getCell(row, headers, "name") ?? null,
         exchange:
           getCell(row, headers, "exchange")?.toUpperCase() ?? "NSE",
