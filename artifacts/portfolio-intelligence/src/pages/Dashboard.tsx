@@ -1,302 +1,411 @@
-import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useGetDashboardSummary, useGetDashboardAlerts, useGetOvernightMarkets, useGetIndiaMacro, useGetTopActions, useGetUpcomingCatalysts, useDismissAlert } from '@workspace/api-client-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { formatCurrency, formatPercent, formatCompactNumber } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, ArrowRight, Activity, Globe, DollarSign, BellRing, Target, AlertTriangle, X, Shield, CheckCircle2 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { Button } from '@/components/ui/button';
-import { useLocation } from 'wouter';
-import { cn } from '@/lib/utils';
+import type { ComponentType } from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarDays,
+  CircleDollarSign,
+  CloudOff,
+  Database,
+  RefreshCw,
+  ShieldAlert,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import { useLocation } from "wouter";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { useIntegrationHealth } from "@/features/integration/api";
+import {
+  useGenerateMorningBrief,
+  useLatestMorningBrief,
+  useProviderStatus,
+  useRefreshMarketIntelligence,
+  type MorningBriefAction,
+  type MorningBriefRisk,
+} from "@/features/intelligence/api";
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatPct(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function relativeTime(value: string | null | undefined): string {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1_440) return `${Math.floor(minutes / 60)}h ago`;
+  return `${Math.floor(minutes / 1_440)}d ago`;
+}
+
+function priorityClass(priority: "high" | "medium" | "low") {
+  return priority === "high"
+    ? "border-destructive/30 bg-destructive/5 text-destructive"
+    : priority === "medium"
+      ? "border-amber-500/30 bg-amber-500/5 text-amber-500"
+      : "border-blue-500/30 bg-blue-500/5 text-blue-500";
+}
 
 export function Dashboard() {
   const [, navigate] = useLocation();
-  const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
-  const { data: alerts, isLoading: loadingAlerts } = useGetDashboardAlerts();
-  const { data: markets, isLoading: loadingMarkets } = useGetOvernightMarkets();
-  const { data: macro, isLoading: loadingMacro } = useGetIndiaMacro();
-  const { data: actions, isLoading: loadingActions } = useGetTopActions();
-  const { data: catalysts, isLoading: loadingCatalysts } = useGetUpcomingCatalysts();
+  const briefQuery = useLatestMorningBrief();
+  const providerQuery = useProviderStatus();
+  const generateBrief = useGenerateMorningBrief();
+  const refreshMarket = useRefreshMarketIntelligence();
+  const systemQuery = useIntegrationHealth();
+  const brief = briefQuery.data;
+  const busy = generateBrief.isPending || refreshMarket.isPending;
+
+  const refreshAndGenerate = async () => {
+    if (providerQuery.data?.configured) {
+      await refreshMarket.mutateAsync();
+    }
+    await generateBrief.mutateAsync();
+  };
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+    <div className="mx-auto max-w-[1600px] space-y-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">CIO Dashboard</h1>
-          <p className="text-muted-foreground text-sm mt-1 font-mono">
-            {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+            <Sparkles className="h-4 w-4" /> Daily decision desk
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight">Morning Brief</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {new Date().toLocaleDateString("en-IN", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/market-intelligence")}
+          >
+            <Database className="mr-2 h-4 w-4" /> Data workspace
+          </Button>
+          <Button disabled={busy} onClick={() => void refreshAndGenerate()}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", busy && "animate-spin")} />
+            {providerQuery.data?.configured
+              ? "Refresh brief"
+              : "Regenerate brief"}
+          </Button>
+        </div>
       </div>
 
-      {alerts && alerts.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {alerts.filter(a => !a.dismissed).map(alert => (
-            <AlertCard key={alert.id} alert={alert} />
-          ))}
-        </div>
+      {systemQuery.data && (
+        <button
+          type="button"
+          onClick={() => navigate("/system-health")}
+          className="flex w-full flex-col gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-secondary/10 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={cn(
+                "flex h-10 w-10 items-center justify-center rounded-full border text-sm font-bold",
+                systemQuery.data.readiness.band === "ready"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                  : systemQuery.data.readiness.band === "setup_required"
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-500",
+              )}
+            >
+              {systemQuery.data.readiness.score}
+            </div>
+            <div>
+              <p className="text-sm font-semibold">System readiness</p>
+              <p className="text-xs text-muted-foreground">
+                {systemQuery.data.readiness.blockers.length > 0
+                  ? `${systemQuery.data.readiness.blockers.length} blocker${systemQuery.data.readiness.blockers.length === 1 ? "" : "s"} require review`
+                  : `${systemQuery.data.readiness.recommendations.length} recommended setup action${systemQuery.data.readiness.recommendations.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+          </div>
+          <span className="text-xs font-semibold text-primary">
+            Open system health →
+          </span>
+        </button>
       )}
 
-      {/* Top Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard 
-          title="Portfolio Value" 
-          value={summary?.portfolioValue ? formatCurrency(summary.portfolioValue) : '-'}
-          subtitle={`Cash: ${summary?.cashBalance ? formatCurrency(summary.cashBalance) : '-'}`}
-          loading={loadingSummary}
-          icon={DollarSign}
-        />
-        <MetricCard 
-          title="Daily P&L" 
-          value={summary?.dailyPnl ? formatCurrency(Math.abs(summary.dailyPnl)) : '-'}
-          subtitle={summary?.dailyPnlPct ? formatPercent(summary.dailyPnlPct) : '-'}
-          trend={summary?.dailyPnl && summary.dailyPnl >= 0 ? 'up' : 'down'}
-          loading={loadingSummary}
-          icon={Activity}
-        />
-        <MetricCard 
-          title="Overall P&L" 
-          value={summary?.overallPnl ? formatCurrency(Math.abs(summary.overallPnl)) : '-'}
-          subtitle={summary?.overallPnlPct ? formatPercent(summary.overallPnlPct) : '-'}
-          trend={summary?.overallPnl && summary.overallPnl >= 0 ? 'up' : 'down'}
-          loading={loadingSummary}
-          icon={TrendingUp}
-        />
-        <MetricCard 
-          title="Conviction Changes" 
-          value={summary?.convictionChanges.length.toString() || '0'}
-          subtitle="In last 30 days"
-          loading={loadingSummary}
-          icon={Target}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column: Macro & Markets */}
-        <div className="space-y-6">
-          <Card className="bg-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Globe className="w-4 h-4 text-muted-foreground" />
-                Overnight Global Markets
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingMarkets ? (
-                <div className="space-y-2">
-                  {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+      {briefQuery.isLoading ? (
+        <DashboardSkeleton />
+      ) : !brief ? (
+        <Card className="border-dashed">
+          <CardContent className="flex min-h-72 flex-col items-center justify-center gap-4 text-center">
+            <CloudOff className="h-10 w-10 text-muted-foreground" />
+            <div>
+              <h2 className="text-xl font-semibold">No brief generated yet</h2>
+              <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                AlphaDesk can generate a grounded brief from your portfolio and
+                research even before a live market provider is connected.
+              </p>
+            </div>
+            <Button onClick={() => generateBrief.mutate()} disabled={busy}>
+              Generate first brief
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/10 via-card to-card">
+            <CardContent className="p-6 md:p-8">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-4xl">
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="rounded-full border bg-background/80 px-2.5 py-1 font-mono">
+                      Generated {relativeTime(brief.generatedAt)}
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 font-medium capitalize",
+                        brief.marketPulse.tone === "positive"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                          : brief.marketPulse.tone === "negative"
+                            ? "border-destructive/30 bg-destructive/10 text-destructive"
+                            : "border-amber-500/30 bg-amber-500/10 text-amber-500",
+                      )}
+                    >
+                      {brief.marketPulse.tone} market tone
+                    </span>
+                  </div>
+                  <h2 className="text-2xl font-bold leading-tight md:text-3xl">
+                    {brief.headline}
+                  </h2>
+                  <p className="mt-4 text-sm leading-6 text-muted-foreground md:text-base">
+                    {brief.summary}
+                  </p>
                 </div>
-              ) : (
+                <DataQualityBadge brief={brief} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              title="Portfolio value"
+              value={formatCurrency(brief.portfolioPulse.totalValue)}
+              detail={`${brief.portfolioPulse.holdingsCount} holdings`}
+              icon={CircleDollarSign}
+            />
+            <MetricCard
+              title="Day P&L"
+              value={formatCurrency(brief.portfolioPulse.dailyPnl)}
+              detail={formatPct(brief.portfolioPulse.dailyPnlPct)}
+              positive={brief.portfolioPulse.dailyPnl >= 0}
+              icon={
+                brief.portfolioPulse.dailyPnl >= 0 ? TrendingUp : TrendingDown
+              }
+            />
+            <MetricCard
+              title="Total return"
+              value={formatPct(brief.portfolioPulse.totalReturnPct)}
+              detail={formatCurrency(brief.portfolioPulse.totalPnl)}
+              positive={brief.portfolioPulse.totalPnl >= 0}
+              icon={TrendingUp}
+            />
+            <MetricCard
+              title="Largest position"
+              value={brief.portfolioPulse.largestPositionTicker ?? "—"}
+              detail={`${brief.portfolioPulse.largestPositionPct.toFixed(1)}% · ${brief.portfolioPulse.concentrationRisk} risk`}
+              icon={ShieldAlert}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <Card className="xl:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="h-4 w-4 text-primary" /> Priority actions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {brief.priorityActions.length === 0 ? (
+                  <EmptyLine text="No priority actions were generated." />
+                ) : (
+                  brief.priorityActions.map((action) => (
+                    <ActionRow
+                      key={action.id}
+                      action={action}
+                      onOpen={() =>
+                        navigate(
+                          action.ticker
+                            ? `/research?ticker=${action.ticker}`
+                            : "/market-intelligence",
+                        )
+                      }
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" /> Key risks
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {brief.risks.length === 0 ? (
+                  <EmptyLine text="No material risks were surfaced." />
+                ) : (
+                  brief.risks
+                    .slice(0, 6)
+                    .map((risk) => <RiskRow key={risk.id} risk={risk} />)
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Market pulse</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-4 text-sm text-muted-foreground">
+                  {brief.marketPulse.summary}
+                </p>
                 <div className="space-y-1">
-                  {markets?.map(market => (
-                    <div key={market.name} className="flex justify-between items-center py-2 border-b border-border/50 last:border-0">
-                      <span className="text-sm font-medium">{market.name}</span>
-                      <div className="flex items-center gap-3 text-sm">
-                        <span className="font-mono">{market.value.toLocaleString()}</span>
-                        <span className={cn("font-mono font-medium", market.change >= 0 ? "text-emerald-500" : "text-destructive")}>
-                          {market.change > 0 ? '+' : ''}{market.changePct.toFixed(2)}%
+                  {brief.marketPulse.keyMoves.length === 0 ? (
+                    <EmptyLine text="No market indicators available." />
+                  ) : (
+                    brief.marketPulse.keyMoves.map((move) => (
+                      <div
+                        key={`${move.symbol}-${move.asOf}`}
+                        className="flex items-center justify-between border-b border-border/50 py-2.5 last:border-0"
+                      >
+                        <div>
+                          <div className="text-sm font-semibold">
+                            {move.name}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {move.source} · {relativeTime(move.asOf)}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono text-sm">
+                          <div>{move.value.toLocaleString("en-IN")}</div>
+                          <div
+                            className={cn(
+                              "text-xs",
+                              (move.changePct ?? 0) >= 0
+                                ? "text-emerald-500"
+                                : "text-destructive",
+                            )}
+                          >
+                            {move.changePct === null
+                              ? "—"
+                              : formatPct(move.changePct)}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarDays className="h-4 w-4 text-primary" /> Upcoming
+                  events
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {brief.upcomingEvents.length === 0 ? (
+                  <EmptyLine text="No portfolio-relevant events in the next 14 days." />
+                ) : (
+                  brief.upcomingEvents.slice(0, 8).map((event) => (
+                    <div
+                      key={event.id}
+                      className="flex gap-3 rounded-lg border bg-secondary/20 p-3"
+                    >
+                      <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-md border bg-background">
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                          {new Date(event.eventAt).toLocaleString("en-IN", {
+                            month: "short",
+                          })}
+                        </span>
+                        <span className="font-mono text-base font-bold">
+                          {new Date(event.eventAt).getDate()}
                         </span>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">India Macro Strip</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingMacro ? (
-                <div className="space-y-2">
-                  {[1,2,3,4].map(i => <Skeleton key={i} className="h-10 w-full" />)}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  {macro?.map(m => (
-                    <div key={m.name} className="bg-secondary/50 p-3 rounded-lg border border-border/50">
-                      <div className="text-xs text-muted-foreground mb-1">{m.name}</div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-lg font-semibold font-mono">{m.value}{m.unit}</span>
-                        {m.trend === 'up' && <TrendingUp className="w-3 h-3 text-destructive" />}
-                        {m.trend === 'down' && <TrendingDown className="w-3 h-3 text-emerald-500" />}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Middle Column: Sector Allocation & Catalysts */}
-        <div className="space-y-6">
-          <Card className="flex flex-col h-[320px]">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base">Sector Allocation</CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex items-center justify-center min-h-0 pb-6">
-              {loadingSummary ? (
-                <Skeleton className="w-48 h-48 rounded-full" />
-              ) : (
-                <div className="w-full h-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={summary?.sectorAllocation || []}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={2}
-                        dataKey="value"
-                        nameKey="sector"
-                        stroke="none"
-                      >
-                        {(summary?.sectorAllocation || []).map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${(index % 5) + 1}))`} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        formatter={(value: number) => formatCurrency(value)}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
-                        itemStyle={{ color: 'hsl(var(--foreground))' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Upcoming Catalysts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingCatalysts ? (
-                <div className="space-y-3">
-                  {[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {catalysts?.slice(0,4).map(cat => (
-                    <div key={cat.id} className="flex gap-3 items-start">
-                      <div className="w-12 h-12 rounded bg-secondary flex flex-col items-center justify-center shrink-0 border border-border">
-                        <span className="text-[10px] text-muted-foreground uppercase font-bold">{new Date(cat.date).toLocaleString('en-IN', { month: 'short' })}</span>
-                        <span className="text-sm font-bold font-mono">{new Date(cat.date).getDate()}</span>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm">{cat.ticker}</span>
-                          <span className={cn(
-                            "text-[10px] px-1.5 py-0.5 rounded-sm font-medium",
-                            cat.impact === 'high' ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground"
-                          )}>
-                            {cat.impact} impact
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {event.ticker && (
+                            <span className="text-sm font-bold">
+                              {event.ticker}
+                            </span>
+                          )}
+                          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                            {event.impact}
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground leading-tight mt-0.5">{cat.event}</p>
+                        <p className="mt-1 text-sm">{event.title}</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {event.source}
+                        </p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right Column: Actions */}
-        <div className="space-y-6">
-          <Card className="h-full">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Top Actions Today</CardTitle>
-              <CardDescription>Generated by conviction models</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 p-3 bg-secondary/30 rounded-lg flex items-center justify-between border">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center text-xs font-bold text-amber-500">71</div>
-                  <div>
-                    <p className="text-xs font-semibold">Portfolio Health Score</p>
-                    <p className="text-[10px] text-amber-500 font-medium">CAUTION</p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => navigate('/guardrails')}>Details →</Button>
-              </div>
-              {loadingActions ? (
-                <div className="space-y-3">
-                  {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 w-full" />)}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {actions?.map(action => (
-                    <div key={action.id} className="p-3 rounded-lg border border-border bg-secondary/30">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-xs font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider",
-                            action.action === 'buy' || action.action === 'add' ? "bg-emerald-500/20 text-emerald-500" :
-                            action.action === 'sell' || action.action === 'trim' ? "bg-destructive/20 text-destructive" :
-                            "bg-blue-500/20 text-blue-500"
-                          )}>
-                            {action.action}
-                          </span>
-                          <span className="font-bold">{action.ticker}</span>
-                        </div>
-                        {action.suggestedPrice && (
-                          <span className="text-xs font-mono bg-background px-1.5 py-0.5 rounded border border-border">
-                            @ ₹{action.suggestedPrice}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground">{action.rationale}</p>
-                      <div className="mt-3 flex justify-end">
-                        <GuardianExecuteButton action={action} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-      </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function MetricCard({ title, value, subtitle, trend, loading, icon: Icon }: any) {
+function MetricCard({
+  title,
+  value,
+  detail,
+  positive,
+  icon: Icon,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  positive?: boolean;
+  icon: ComponentType<{ className?: string }>;
+}) {
   return (
     <Card>
-      <CardContent className="p-6">
-        <div className="flex justify-between items-start">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            {loading ? (
-              <Skeleton className="h-8 w-24" />
-            ) : (
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-bold font-mono tracking-tight">{value}</h2>
-                {trend && (
-                  <span className={cn("flex items-center text-sm font-medium", trend === 'up' ? "text-emerald-500" : "text-destructive")}>
-                    {trend === 'up' ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
-                  </span>
-                )}
-              </div>
-            )}
-            {loading ? (
-              <Skeleton className="h-4 w-16 mt-1" />
-            ) : (
-              <p className="text-xs text-muted-foreground font-mono">{subtitle}</p>
-            )}
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p
+              className={cn(
+                "mt-2 font-mono text-2xl font-bold",
+                positive === true && "text-emerald-500",
+                positive === false && "text-destructive",
+              )}
+            >
+              {value}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
           </div>
-          <div className="p-2 bg-secondary rounded-md text-muted-foreground">
-            {Icon && <Icon className="w-5 h-5" />}
+          <div className="rounded-lg border bg-secondary/30 p-2.5">
+            <Icon className="h-5 w-5 text-primary" />
           </div>
         </div>
       </CardContent>
@@ -304,120 +413,134 @@ function MetricCard({ title, value, subtitle, trend, loading, icon: Icon }: any)
   );
 }
 
-function AlertCard({ alert }: any) {
-  const dismissMutation = useDismissAlert();
-  const [, navigate] = useLocation();
-
+function ActionRow({
+  action,
+  onOpen,
+}: {
+  action: MorningBriefAction;
+  onOpen: () => void;
+}) {
   return (
-    <div className={cn(
-      "relative overflow-hidden rounded-lg border p-4 flex gap-4 items-start",
-      alert.severity === 'critical' ? "bg-destructive/10 border-destructive/30" : 
-      alert.severity === 'high' ? "bg-orange-500/10 border-orange-500/30" : 
-      "bg-primary/10 border-primary/30"
-    )}>
-      <div className={cn(
-        "p-2 rounded-full mt-1 shrink-0",
-        alert.severity === 'critical' ? "bg-destructive/20 text-destructive" :
-        alert.severity === 'high' ? "bg-orange-500/20 text-orange-500" :
-        "bg-primary/20 text-primary"
-      )}>
-        <AlertTriangle className="w-5 h-5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span
-            className="font-bold text-sm tracking-tight cursor-pointer hover:text-primary transition-colors"
-            onClick={() => navigate(`/research?ticker=${alert.ticker}`)}
-          >
-            {alert.ticker}
-          </span>
-          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-background/50 border border-border/50">
-            {alert.alertType.replace('_', ' ')}
-          </span>
-          <span className="text-xs text-muted-foreground ml-auto">
-            {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        </div>
-        <h4 className="font-semibold text-foreground mb-1">{alert.headline}</h4>
-        <p className="text-sm text-muted-foreground line-clamp-2">{alert.detail}</p>
-      </div>
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        className="h-8 w-8 shrink-0 hover:bg-background/50"
-        onClick={() => dismissMutation.mutate({ id: alert.id })}
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full items-start gap-3 rounded-lg border bg-secondary/15 p-4 text-left transition-colors hover:bg-secondary/40"
+    >
+      <span
+        className={cn(
+          "mt-0.5 rounded border px-2 py-1 text-[10px] font-bold uppercase tracking-wider",
+          priorityClass(action.priority),
+        )}
       >
-        <X className="w-4 h-4" />
-      </Button>
+        {action.priority}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          {action.ticker && <span className="font-bold">{action.ticker}</span>}
+          <span className="font-semibold">{action.title}</span>
+        </div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">
+          {action.rationale}
+        </p>
+      </div>
+      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+function RiskRow({ risk }: { risk: MorningBriefRisk }) {
+  return (
+    <div className="rounded-lg border bg-secondary/15 p-3">
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+            risk.severity === "high"
+              ? "bg-destructive/15 text-destructive"
+              : risk.severity === "medium"
+                ? "bg-amber-500/15 text-amber-500"
+                : "bg-blue-500/15 text-blue-500",
+          )}
+        >
+          {risk.severity}
+        </span>
+        {risk.ticker && (
+          <span className="text-xs font-bold">{risk.ticker}</span>
+        )}
+      </div>
+      <p className="mt-2 text-sm font-medium">{risk.title}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {risk.detail}
+      </p>
     </div>
   );
 }
 
-function GuardianExecuteButton({ action }: { action: any }) {
-  const [, navigate] = useLocation();
-  const [showModal, setShowModal] = useState(false);
-
+function DataQualityBadge({
+  brief,
+}: {
+  brief: NonNullable<ReturnType<typeof useLatestMorningBrief>["data"]>;
+}) {
+  const healthy = brief.dataQuality.warnings.length === 0;
   return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 text-xs flex items-center gap-1"
-        onClick={() => setShowModal(true)}
-      >
-        <Shield className="w-3 h-3" />
-        Execute
-      </Button>
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowModal(false)}>
-          <div className="bg-card border rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary/10 rounded-full">
-                <Shield className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="font-semibold">Guardian Mode Review</h3>
-                <p className="text-xs text-muted-foreground">Pre-execution compliance check</p>
-              </div>
-            </div>
-
-            <div className="bg-secondary/50 rounded-lg p-3">
-              <p className="text-sm font-medium uppercase text-xs tracking-wider text-muted-foreground mb-1">Proposed Action</p>
-              <p className="font-bold">{action.action.toUpperCase()} {action.ticker}</p>
-              <p className="text-xs text-muted-foreground mt-1">{action.rationale}</p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pre-Trade Checklist</p>
-              {[
-                { label: 'Investment rationale documented', check: true },
-                { label: 'Bear case considered', check: false },
-                { label: 'Target price set', check: !!action.suggestedPrice },
-                { label: 'Invalidation conditions defined', check: false },
-                { label: 'Max acceptable loss defined', check: false },
-              ].map(item => (
-                <div key={item.label} className="flex items-center gap-2 text-sm">
-                  <div className={cn("w-4 h-4 rounded-full flex items-center justify-center shrink-0", item.check ? "bg-emerald-500/20 text-emerald-500" : "bg-destructive/20 text-destructive")}>
-                    {item.check ? <CheckCircle2 className="w-3 h-3" /> : <X className="w-3 h-3" />}
-                  </div>
-                  <span className={item.check ? "" : "text-muted-foreground"}>{item.label}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-200">Complete the pre-trade checklist in Research Terminal before executing. Go to Guardrails to configure rules.</p>
-            </div>
-
-            <div className="flex gap-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
-              <Button variant="outline" size="sm" onClick={() => { setShowModal(false); navigate(`/research?ticker=${action.ticker}`); }}>Open Research</Button>
-              <Button size="sm" onClick={() => { setShowModal(false); navigate('/guardrails'); }}>Configure Guardrails</Button>
-            </div>
-          </div>
-        </div>
+    <div
+      className={cn(
+        "min-w-56 rounded-xl border p-4",
+        healthy
+          ? "border-emerald-500/20 bg-emerald-500/5"
+          : "border-amber-500/30 bg-amber-500/5",
       )}
-    </>
+    >
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        {healthy ? (
+          <Database className="h-4 w-4 text-emerald-500" />
+        ) : (
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+        )}
+        Data quality
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <p className="text-muted-foreground">Market points</p>
+          <p className="font-mono font-bold">
+            {brief.dataQuality.marketPointCount}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Portfolio news</p>
+          <p className="font-mono font-bold">
+            {brief.dataQuality.portfolioNewsCount}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">
+        Latest market data: {relativeTime(brief.dataQuality.latestMarketAsOf)}
+      </p>
+    </div>
+  );
+}
+
+function EmptyLine({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-48 w-full rounded-xl" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((item) => (
+          <Skeleton key={item} className="h-32 w-full rounded-xl" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <Skeleton className="h-96 w-full rounded-xl xl:col-span-2" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    </div>
   );
 }

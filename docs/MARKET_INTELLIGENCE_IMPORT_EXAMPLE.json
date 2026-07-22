@@ -1,0 +1,62 @@
+{
+  "provider": "verified-source",
+  "fetchedAt": "2026-07-19T03:30:00.000Z",
+  "points": [
+    {
+      "kind": "index",
+      "symbol": "NIFTY50",
+      "name": "Nifty 50",
+      "value": 25000,
+      "change": 120,
+      "changePct": 0.48,
+      "unit": "points",
+      "region": "India",
+      "source": "Verified market source",
+      "sourceUrl": "https://example.com/nifty",
+      "asOf": "2026-07-19T03:30:00.000Z"
+    },
+    {
+      "kind": "equity",
+      "symbol": "RELIANCE",
+      "name": "Reliance Industries",
+      "value": 1500,
+      "change": 12,
+      "changePct": 0.81,
+      "unit": "INR",
+      "region": "India",
+      "source": "Verified quote source",
+      "sourceUrl": "https://example.com/reliance-quote",
+      "asOf": "2026-07-19T03:30:00.000Z",
+      "metadata": {
+        "previousClose": 1488
+      }
+    }
+  ],
+  "news": [
+    {
+      "externalId": "source-article-123",
+      "ticker": "RELIANCE",
+      "headline": "Replace with a verified portfolio-relevant headline",
+      "summary": "Replace with a concise factual summary.",
+      "source": "Verified publisher",
+      "sourceUrl": "https://example.com/article",
+      "publishedAt": "2026-07-19T02:00:00.000Z",
+      "sentiment": "neutral",
+      "relevanceScore": 0.9
+    }
+  ],
+  "events": [
+    {
+      "externalId": "reliance-results-2026-q1",
+      "ticker": "RELIANCE",
+      "companyName": "Reliance Industries",
+      "eventType": "earnings",
+      "title": "Quarterly results",
+      "description": "Replace with verified calendar details.",
+      "eventAt": "2026-07-25T10:00:00.000Z",
+      "impact": "high",
+      "source": "Company calendar",
+      "sourceUrl": "https://example.com/calendar"
+    }
+  ]
+}

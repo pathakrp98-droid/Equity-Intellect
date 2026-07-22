@@ -1,0 +1,19 @@
+{
+  "action": "add",
+  "ticker": "INFY",
+  "quantity": 10,
+  "price": 1600,
+  "fees": 25,
+  "rationale": "FY27 EPS estimate increased 12%; the stock trades at 24x forward P/E versus a 28x base-case multiple.",
+  "investmentHorizon": "3 years",
+  "bearCase": "US discretionary technology spending slows and constant-currency growth remains below 4% for two quarters.",
+  "targetPrice": 2000,
+  "thesisInvalidation": "Two quarters below 4% constant-currency growth with EBIT margin below 19%.",
+  "maxAcceptableLossPct": 18,
+  "exitConditions": "Trim at the target value or exit when an invalidation condition is met.",
+  "evidenceQuality": "high",
+  "citedSourceIds": [
+    "research:INFY",
+    "news:42"
+  ]
+}

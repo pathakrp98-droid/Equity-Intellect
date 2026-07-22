@@ -1,0 +1,37 @@
+{
+  "ticker": "RELIANCE",
+  "name": "Reliance Industries",
+  "decisionType": "buy",
+  "status": "planned",
+  "decisionDate": "2026-07-19T10:00:00+05:30",
+  "executionPrice": 2840,
+  "quantity": 10,
+  "thesisSummary": "Retail and digital cash flows should support earnings compounding while the energy cycle provides optionality.",
+  "rationale": "The position is being initiated after a valuation reset. Consolidated earnings expectations remain supported by Jio ARPU growth and improving retail margins. The entry is staged because energy earnings and capex intensity remain uncertain.",
+  "expectedReturnPct": 22,
+  "expectedDownsidePct": -14,
+  "targetPrice": 3465,
+  "bearPrice": 2440,
+  "investmentHorizon": "24 months",
+  "emotionalState": "calm",
+  "confidenceScore": 4,
+  "evidenceQuality": "high",
+  "keyFactors": [
+    "Jio ARPU and subscriber monetisation",
+    "Retail margin improvement",
+    "Valuation below the recent trading range"
+  ],
+  "contraryEvidence": [
+    "Large capex programme could delay free-cash-flow conversion",
+    "Energy earnings remain cyclical"
+  ],
+  "sourceReferences": [
+    {
+      "id": "ril-q1-fy27",
+      "label": "Q1 FY27 investor presentation",
+      "url": "https://example.com/source",
+      "publishedAt": "2026-07-18"
+    }
+  ],
+  "nextReviewAt": "2026-10-19T10:00:00+05:30"
+}

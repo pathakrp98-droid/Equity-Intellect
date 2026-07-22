@@ -1,876 +1,346 @@
-import { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  Shield, ShieldCheck, ShieldAlert, ShieldX, AlertTriangle, CheckCircle2,
-  XCircle, Clock, BarChart3, Brain, FileText, ChevronDown, ChevronRight,
-  Download, Settings2, Eye, EyeOff
-} from 'lucide-react';
+  AlertTriangle,
+  Brain,
+  CheckCircle2,
+  FileCheck2,
+  Gauge,
+  History,
+  LockKeyhole,
+  RefreshCw,
+  Save,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  SlidersHorizontal,
+  TestTube2,
+  XCircle,
+} from "lucide-react";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import {
+  useCancelGuardianDecision,
+  useExecuteGuardianDecision,
+  useGuardianAudit,
+  useGuardianCheck,
+  useGuardianContext,
+  useGuardianHealth,
+  useGuardianPackets,
+  useGuardianSettings,
+  useUpdateGuardianSettings,
+  type GuardianCheckResponse,
+  type GuardianProposalInput,
+  type GuardianSettings,
+} from "@/features/guardian/api";
 
-interface Limit {
-  id: string;
-  name: string;
-  current: string;
-  currentNum: number;
-  limit: number;
-  unit: string;
-  type: 'HARD' | 'SOFT';
-  status: 'ok' | 'warn' | 'breach';
-  detail: string;
-}
+const currency = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
 
-interface AuditRow {
-  id: string;
-  timestamp: string;
-  ticker: string;
-  action: string;
-  decision: 'APPROVED' | 'APPROVED_WARNINGS' | 'REJECTED' | 'REQUIRE_EVIDENCE';
-  breachedRules: string[];
-  researchScore: number;
-  override: boolean;
-  overrideRationale?: string;
-  overrideTime?: string;
-  finalAction: string;
-}
+const number = new Intl.NumberFormat("en-IN", {
+  maximumFractionDigits: 2,
+});
 
-interface BiasFlag {
-  date: string;
-  ticker: string;
-  action: string;
-  bias: string;
-  overridden: boolean;
-}
+const blankProposal: GuardianProposalInput = {
+  action: "buy",
+  ticker: "",
+  quantity: null,
+  price: null,
+  fees: 0,
+  rationale: "",
+  investmentHorizon: "",
+  bearCase: "",
+  targetPrice: null,
+  thesisInvalidation: "",
+  maxAcceptableLossPct: null,
+  exitConditions: "",
+  evidenceQuality: "medium",
+  citedSourceIds: [],
+};
 
-// ─── Static Data ─────────────────────────────────────────────────────────────
-
-const INITIAL_LIMITS: Limit[] = [
-  { id: 'stock_conc', name: 'Max Stock Concentration', current: '15.2% (INFY)', currentNum: 15.2, limit: 20, unit: '%', type: 'HARD', status: 'ok', detail: 'Largest single position' },
-  { id: 'sector_conc', name: 'Max Sector Concentration', current: '30.1% (Banking)', currentNum: 30.1, limit: 35, unit: '%', type: 'HARD', status: 'ok', detail: 'Largest sector weight' },
-  { id: 'smallcap', name: 'Max Small-Cap Exposure', current: '4.8%', currentNum: 4.8, limit: 20, unit: '%', type: 'SOFT', status: 'ok', detail: 'Small-cap total weight' },
-  { id: 'cash', name: 'Min Cash Buffer', current: '2.6%', currentNum: 2.6, limit: 5, unit: '%', type: 'SOFT', status: 'warn', detail: 'Liquid cash ratio' },
-  { id: 'corr', name: 'Max Correlated Positions', current: '3 (tech cluster)', currentNum: 3, limit: 4, unit: '', type: 'SOFT', status: 'ok', detail: 'Correlated stock count' },
-  { id: 'new_pos', name: 'Max Weekly New Positions', current: '0 this week', currentNum: 0, limit: 2, unit: '', type: 'HARD', status: 'ok', detail: 'New entries this week' },
-  { id: 'drawdown', name: 'Max Portfolio Drawdown', current: '-2.4% MTD', currentNum: 2.4, limit: 15, unit: '%', type: 'HARD', status: 'ok', detail: 'MTD drawdown' },
-  { id: 'research', name: 'Min Research Score', current: 'avg 68/100', currentNum: 68, limit: 70, unit: '/100', type: 'SOFT', status: 'warn', detail: 'Average research score' },
-];
-
-const GUARDIAN_DECISIONS = [
-  { ticker: 'INFY', action: 'ADD', decision: 'APPROVED', date: '2026-07-10', override: false },
-  { ticker: 'BAJFINANCE', action: 'TRIM', decision: 'APPROVED WITH WARNINGS', date: '2026-07-08', override: false },
-  { ticker: 'ASIANPAINT', action: 'HOLD', decision: 'REQUIRE EVIDENCE', date: '2026-07-05', override: false, note: 'cancelled' },
-  { ticker: 'ZOMATO', action: 'BUY', decision: 'REJECTED', date: '2026-07-01', override: true },
-  { ticker: 'DMART', action: 'ADD', decision: 'APPROVED', date: '2026-06-28', override: false },
-];
-
-const AUDIT_DATA: AuditRow[] = [
-  { id: '1', timestamp: '2026-07-10 14:32', ticker: 'INFY', action: 'ADD', decision: 'APPROVED', breachedRules: [], researchScore: 82, override: false, finalAction: 'Executed' },
-  { id: '2', timestamp: '2026-07-08 10:15', ticker: 'BAJFINANCE', action: 'TRIM', decision: 'APPROVED_WARNINGS', breachedRules: ['Min Research Score (soft)'], researchScore: 65, override: false, finalAction: 'Executed with acknowledgment' },
-  { id: '3', timestamp: '2026-07-05 09:47', ticker: 'ASIANPAINT', action: 'HOLD', decision: 'REQUIRE_EVIDENCE', breachedRules: ['Bear case not updated in 45 days'], researchScore: 58, override: false, finalAction: 'Cancelled by user' },
-  { id: '4', timestamp: '2026-07-01 16:22', ticker: 'ZOMATO', action: 'BUY', decision: 'REJECTED', breachedRules: ['Max Stock Concentration (hard)', 'Min Research Score (soft)'], researchScore: 44, override: true, overrideRationale: 'Strong conviction on platform monetization cycle. Willing to accept elevated risk given 3-year horizon. Will monitor quarterly.', overrideTime: '2026-07-01 16:45', finalAction: 'Executed (override)' },
-  { id: '5', timestamp: '2026-06-28 11:05', ticker: 'DMART', action: 'ADD', decision: 'APPROVED', breachedRules: [], researchScore: 79, override: false, finalAction: 'Executed' },
-  { id: '6', timestamp: '2026-06-20 13:30', ticker: 'HDFCBANK', action: 'BUY', decision: 'APPROVED_WARNINGS', breachedRules: ['Max Sector Concentration (soft warning)'], researchScore: 71, override: false, finalAction: 'Executed with acknowledgment' },
-  { id: '7', timestamp: '2026-06-15 09:00', ticker: 'RELIANCE', action: 'TRIM', decision: 'APPROVED', breachedRules: [], researchScore: 88, override: false, finalAction: 'Executed' },
-  { id: '8', timestamp: '2026-06-10 15:45', ticker: 'PAYTM', action: 'BUY', decision: 'REJECTED', breachedRules: ['Min Research Score (hard enforcement)', 'Thesis invalidation detected'], researchScore: 31, override: true, overrideRationale: 'Post-RBI license restoration — fundamentally changed picture. Research score will be updated once Q1 results published. Taking small starter position.', overrideTime: '2026-06-10 16:10', finalAction: 'Executed (override)' },
-  { id: '9', timestamp: '2026-06-05 10:20', ticker: 'TCS', action: 'ADD', decision: 'APPROVED', breachedRules: [], researchScore: 91, override: false, finalAction: 'Executed' },
-  { id: '10', timestamp: '2026-05-28 14:00', ticker: 'IRCTC', action: 'SELL', decision: 'REQUIRE_EVIDENCE', breachedRules: ['Exit conditions not documented'], researchScore: 60, override: false, finalAction: 'Executed after evidence provided' },
-];
-
-const BIASES = [
-  { id: 'recency', name: 'Recency Bias', desc: 'Overweighting recent events (last 3 months) over long-term thesis', detected: 'Action taken within 48h of a major price move or news event' },
-  { id: 'confirmation', name: 'Confirmation Bias', desc: 'Seeking only information that supports existing thesis', detected: 'Research terminal visited but no bear case updated in 30+ days' },
-  { id: 'anchoring', name: 'Anchoring', desc: 'Over-relying on purchase price or analyst target as reference', detected: 'Target price matches round number with no DCF/PE methodology noted' },
-  { id: 'overconfidence', name: 'Overconfidence', desc: 'Overstating ability to predict outcomes', detected: "Rationale uses words: 'certain', 'definitely', 'will', 'guaranteed'" },
-  { id: 'narrative', name: 'Narrative Bias', desc: 'Compelling story substituting for quantitative analysis', detected: 'Rationale is qualitative-only with no valuation reference' },
-  { id: 'fomo', name: 'FOMO (Fear of Missing Out)', desc: 'Chasing recent price moves without fresh evidence', detected: 'Buy action after >10% move in 5 days without updated thesis' },
-  { id: 'revenge', name: 'Revenge Trading', desc: 'Attempting to recover losses through aggressive action', detected: 'Buy action on same stock sold at a loss within 30 days' },
-  { id: 'panic', name: 'Panic Selling', desc: 'Selling based on short-term fear rather than thesis change', detected: 'Sell action with rationale containing emotional language' },
-  { id: 'overtrade', name: 'Overtrading', desc: 'Excessive transaction frequency eroding returns', detected: 'More than 3 portfolio changes in a single week' },
-  { id: 'averaging', name: 'Unjustified Averaging Down', desc: 'Adding to a losing position without new evidence', detected: 'Add/buy action when position is down >15% and no thesis update' },
-];
-
-const BIAS_FLAGS: BiasFlag[] = [
-  { date: '2026-07-01', ticker: 'ZOMATO', action: 'BUY', bias: 'FOMO', overridden: true },
-  { date: '2026-06-20', ticker: 'HDFCBANK', action: 'BUY', bias: 'Recency Bias', overridden: false },
-  { date: '2026-06-10', ticker: 'PAYTM', action: 'BUY', bias: 'Confirmation Bias', overridden: true },
-  { date: '2026-05-28', ticker: 'IRCTC', action: 'SELL', bias: 'Panic Selling', overridden: false },
-  { date: '2026-05-15', ticker: 'BAJFINANCE', action: 'ADD', bias: 'Anchoring', overridden: false },
-];
-
-const STRESS_SCENARIOS = [
-  { scenario: 'Market Correction (-20%)', impact: '-₹96.4L (-20.0%)', numericPct: -20.0, severity: 'HIGH' },
-  { scenario: 'Recession (-35%)', impact: '-₹168.7L (-35.0%)', numericPct: -35.0, severity: 'CRITICAL' },
-  { scenario: 'Rate Hike +100bps', impact: '-₹38.6L (-8.0%)', numericPct: -8.0, severity: 'MEDIUM', note: 'Banking/NBFC sector hit' },
-  { scenario: 'Crude Oil +30%', impact: '-₹14.5L (-3.0%)', numericPct: -3.0, severity: 'LOW', note: 'Net positive for energy' },
-  { scenario: 'INR -10%', impact: '+₹21.8L (+4.5%)', numericPct: 4.5, severity: 'LOW', note: 'IT sector tailwind' },
-  { scenario: 'Bajaj Finance Bear Case', impact: '-₹22.4L (-4.6%)', numericPct: -4.6, severity: 'MEDIUM' },
-];
-
-const PRE_TRADE_ITEMS = [
-  { id: 'rationale', label: 'Investment Rationale', desc: 'Why now, what changed', required: true },
-  { id: 'horizon', label: 'Investment Horizon', desc: 'Short/medium/long term, specific timeline', required: true },
-  { id: 'bear', label: 'Bear Case', desc: 'What could go wrong, quantified', required: true },
-  { id: 'cases', label: 'Base & Bull Cases', desc: 'Expected and optimistic scenarios', required: true },
-  { id: 'target', label: 'Target Price with Methodology', desc: 'DCF, PE, or other methodology', required: true },
-  { id: 'invalidation', label: 'Thesis Invalidation Conditions', desc: 'When the thesis is wrong', required: true },
-  { id: 'max_loss', label: 'Maximum Acceptable Loss %', desc: 'Pre-defined stop-loss logic', required: true },
-  { id: 'exit', label: 'Exit Conditions', desc: 'When and how to exit', required: true },
-  { id: 'why_not_hold', label: 'Why not hold current position?', desc: 'Opportunity cost rationale (for new buys)', required: true },
-  { id: 'evidence_quality', label: 'Evidence Quality Rating', desc: 'Self-assessed: high/medium/low confidence', required: false },
-  { id: 'sources', label: 'Cited Sources', desc: 'News, filings, broker reports used', required: false },
-];
-
-// ─── Helper Components ────────────────────────────────────────────────────────
-
-function ProgressBar({ pct, status }: { pct: number; status: 'ok' | 'warn' | 'breach' }) {
-  const barColor = status === 'breach' ? 'bg-destructive' : status === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
-  const capped = Math.min(pct, 100);
-  return (
-    <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-      <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${capped}%` }} />
-    </div>
-  );
-}
-
-function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
-  return (
-    <button
-      onClick={onToggle}
-      className={cn(
-        'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none',
-        enabled ? 'bg-emerald-500' : 'bg-secondary'
-      )}
-    >
-      <span
-        className={cn(
-          'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg transform transition-transform',
-          enabled ? 'translate-x-4' : 'translate-x-0'
-        )}
-      />
-    </button>
-  );
-}
-
-function DecisionBadge({ decision }: { decision: string }) {
-  if (decision === 'APPROVED' || decision === 'APPROVED ✓') {
-    return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/20"><CheckCircle2 className="w-3 h-3" /> Approved</span>;
+function decisionStyle(decision: string) {
+  if (decision === "approve") {
+    return {
+      icon: ShieldCheck,
+      label: "Approved",
+      className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
+    };
   }
-  if (decision === 'APPROVED_WARNINGS' || decision === 'APPROVED WITH WARNINGS') {
-    return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/20"><AlertTriangle className="w-3 h-3" /> Warnings</span>;
+  if (decision === "approve_with_warnings") {
+    return {
+      icon: ShieldAlert,
+      label: "Approved with warnings",
+      className: "border-amber-500/40 bg-amber-500/10 text-amber-500",
+    };
   }
-  if (decision === 'REJECTED') {
-    return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20"><XCircle className="w-3 h-3" /> Rejected</span>;
+  if (decision === "require_evidence") {
+    return {
+      icon: FileCheck2,
+      label: "Evidence required",
+      className: "border-blue-500/40 bg-blue-500/10 text-blue-500",
+    };
   }
-  if (decision === 'REQUIRE_EVIDENCE' || decision === 'REQUIRE EVIDENCE') {
-    return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-blue-500/10 text-blue-400 border-blue-500/20"><Clock className="w-3 h-3" /> Evidence</span>;
-  }
-  return <span className="text-xs text-muted-foreground">{decision}</span>;
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const map: Record<string, string> = {
-    CRITICAL: 'bg-destructive/10 text-destructive border-destructive/20',
-    HIGH: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-    MEDIUM: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    LOW: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  return {
+    icon: ShieldX,
+    label: "Blocked",
+    className: "border-destructive/40 bg-destructive/10 text-destructive",
   };
-  return (
-    <span className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border', map[severity] || 'bg-secondary text-muted-foreground border-border')}>
-      {severity}
-    </span>
-  );
 }
 
-// ─── Tab 1: Overview ──────────────────────────────────────────────────────────
-
-function OverviewTab() {
-  return (
-    <div className="space-y-6 p-6">
-      {/* Health Score */}
-      <div className="rounded-xl border bg-card shadow-sm p-6">
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-          <BarChart3 className="w-4 h-4" /> Portfolio Health Score
-        </h2>
-        <div className="flex flex-col md:flex-row gap-8 items-start">
-          {/* Circular Score */}
-          <div className="flex flex-col items-center gap-2 shrink-0">
-            <div className="w-28 h-28 rounded-full border-4 border-amber-500 flex flex-col items-center justify-center bg-amber-500/5">
-              <span className="text-3xl font-black text-amber-400">71</span>
-              <span className="text-[10px] text-muted-foreground">/100</span>
-            </div>
-            <span className="text-xs font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full">CAUTION</span>
-          </div>
-
-          {/* Component bars */}
-          <div className="flex-1 space-y-4 w-full">
-            {[
-              { label: 'Thesis Integrity', score: 16, max: 20, note: '2 positions weakening, 0 broken' },
-              { label: 'Conviction Distribution', score: 14, max: 20, note: 'High 7, Medium 3, Low 2 — concentration in high-conviction' },
-              { label: 'Concentration Risk', score: 15, max: 20, note: 'Max position 15.2%. Sector max 30.1%' },
-              { label: 'Alert Severity', score: 10, max: 20, note: '3 active alerts (2 high severity)' },
-              { label: 'Diversification', score: 16, max: 20, note: '5 sectors, 12 stocks, Tech+Finance dominant' },
-            ].map(c => {
-              const pct = (c.score / c.max) * 100;
-              const barColor = pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-destructive';
-              return (
-                <div key={c.label} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{c.label}</span>
-                    <span className="text-muted-foreground font-mono text-xs">{c.score}/{c.max}</span>
-                  </div>
-                  <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                    <div className={cn('h-full rounded-full', barColor)} style={{ width: `${pct}%` }} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">{c.note}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Top risks */}
-        <div className="mt-6 pt-5 border-t">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Top Risks Detected</h3>
-          <div className="space-y-2">
-            {[
-              'Bajaj Finance NIM compression — thesis assumption under pressure',
-              'Asian Paints margin deterioration — competition from Birla Opus',
-              'HDFC Bank promoter pledge — monitor for escalation',
-            ].map((risk, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-                <span className="text-foreground/80">{risk}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Guardian Mode Summary */}
-      <div className="rounded-xl border bg-card shadow-sm p-6">
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-          <Shield className="w-4 h-4" /> Guardian Mode Summary
-        </h2>
-
-        {/* Stats row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          {[
-            { label: 'Actions Reviewed', value: '4', color: 'text-foreground' },
-            { label: 'Blocked', value: '1', color: 'text-destructive' },
-            { label: 'Override with Rationale', value: '1', color: 'text-amber-400' },
-            { label: 'Approved', value: '2', color: 'text-emerald-400' },
-          ].map(s => (
-            <div key={s.label} className="rounded-lg bg-secondary/40 border border-border p-3 text-center">
-              <div className={cn('text-2xl font-black', s.color)}>{s.value}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">{s.label}</div>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground mb-4">Last 30 days</p>
-
-        {/* Recent decisions table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-[11px] text-muted-foreground uppercase tracking-wider">
-                <th className="text-left pb-2 font-medium">Ticker</th>
-                <th className="text-left pb-2 font-medium">Action</th>
-                <th className="text-left pb-2 font-medium">Decision</th>
-                <th className="text-left pb-2 font-medium">Date</th>
-                <th className="text-left pb-2 font-medium">Override?</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {GUARDIAN_DECISIONS.map((row, i) => (
-                <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                  <td className="py-2.5 font-bold text-foreground">{row.ticker}</td>
-                  <td className="py-2.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-secondary px-2 py-0.5 rounded border border-border">{row.action}</span>
-                  </td>
-                  <td className="py-2.5"><DecisionBadge decision={row.decision} /></td>
-                  <td className="py-2.5 text-xs text-muted-foreground font-mono">{row.date}</td>
-                  <td className="py-2.5">
-                    {row.override ? (
-                      <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">YES (override)</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{(row as any).note ? `No (${(row as any).note})` : 'No'}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Stress Test */}
-      <div className="rounded-xl border bg-card shadow-sm p-6">
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4" /> Pre-Trade Stress Test Preview
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-[11px] text-muted-foreground uppercase tracking-wider">
-                <th className="text-left pb-2 font-medium">Scenario</th>
-                <th className="text-right pb-2 font-medium">Portfolio Impact</th>
-                <th className="text-center pb-2 font-medium">Severity</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {STRESS_SCENARIOS.map((s, i) => {
-                const isPositive = s.numericPct > 0;
-                const impactColor = isPositive
-                  ? 'text-emerald-400'
-                  : s.severity === 'CRITICAL' || s.severity === 'HIGH'
-                  ? 'text-destructive'
-                  : s.severity === 'MEDIUM'
-                  ? 'text-amber-400'
-                  : 'text-foreground';
-                return (
-                  <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                    <td className="py-2.5 font-medium">
-                      {s.scenario}
-                      {s.note && <span className="text-xs text-muted-foreground ml-2">({s.note})</span>}
-                    </td>
-                    <td className={cn('py-2.5 text-right font-mono font-bold', impactColor)}>{s.impact}</td>
-                    <td className="py-2.5 text-center"><SeverityBadge severity={s.severity} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+function healthBandClass(band?: string) {
+  if (band === "healthy") return "text-emerald-500";
+  if (band === "watch") return "text-blue-500";
+  if (band === "caution") return "text-amber-500";
+  return "text-destructive";
 }
 
-// ─── Tab 2: Portfolio Limits ──────────────────────────────────────────────────
-
-function LimitsTab() {
-  const [limits, setLimits] = useState<Limit[]>(INITIAL_LIMITS);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editVal, setEditVal] = useState<string>('');
-
-  const startEdit = (l: Limit) => {
-    setEditing(l.id);
-    setEditVal(String(l.limit));
-  };
-
-  const saveEdit = (id: string) => {
-    const num = parseFloat(editVal);
-    if (!isNaN(num)) {
-      setLimits(prev => prev.map(l => {
-        if (l.id !== id) return l;
-        // recalculate status
-        const ratio = l.id === 'cash' || l.id === 'research'
-          ? l.currentNum / num
-          : l.currentNum / num;
-        let status: 'ok' | 'warn' | 'breach';
-        if (l.id === 'cash') {
-          status = l.currentNum < num * 0.8 ? 'breach' : l.currentNum < num ? 'warn' : 'ok';
-        } else if (l.id === 'research') {
-          status = l.currentNum < num * 0.95 ? 'breach' : l.currentNum < num ? 'warn' : 'ok';
-        } else {
-          status = ratio > 1 ? 'breach' : ratio > 0.8 ? 'warn' : 'ok';
-        }
-        return { ...l, limit: num, status };
-      }));
-    }
-    setEditing(null);
-  };
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {limits.map(l => {
-          const isReverse = l.id === 'cash' || l.id === 'research';
-          const pct = isReverse
-            ? (l.currentNum / l.limit) * 100
-            : (l.currentNum / l.limit) * 100;
-          const displayPct = isReverse ? (100 - pct + 100 * (pct / 100)) : pct; // just use raw ratio for bar
-          const barPct = Math.min((l.currentNum / l.limit) * 100, 110);
-
-          return (
-            <div key={l.id} className={cn(
-              'rounded-xl border bg-card shadow-sm p-4 space-y-3',
-              l.status === 'breach' ? 'border-destructive/30' :
-              l.status === 'warn' ? 'border-amber-500/30' : 'border-border'
-            )}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-sm">{l.name}</span>
-                    <span className={cn(
-                      'text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border',
-                      l.type === 'HARD'
-                        ? 'bg-destructive/10 text-destructive border-destructive/20'
-                        : 'bg-primary/10 text-primary border-primary/20'
-                    )}>{l.type} RULE</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{l.detail}</p>
-                </div>
-                <div className={cn(
-                  'shrink-0 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border',
-                  l.status === 'ok' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-                  l.status === 'warn' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
-                  'text-destructive bg-destructive/10 border-destructive/20'
-                )}>
-                  {l.status === 'ok' ? <><CheckCircle2 className="w-3 h-3" /> OK</> :
-                   l.status === 'warn' ? <><AlertTriangle className="w-3 h-3" /> WARNING</> :
-                   <><XCircle className="w-3 h-3" /> BREACH</>}
-                </div>
-              </div>
-
-              <ProgressBar
-                pct={isReverse ? (l.currentNum / l.limit) * 100 : barPct}
-                status={l.status}
-              />
-
-              <div className="flex items-center justify-between text-xs">
-                <span>
-                  <span className="text-muted-foreground">Current: </span>
-                  <span className="font-semibold text-foreground">{l.current}</span>
-                </span>
-                <div className="flex items-center gap-2">
-                  {editing === l.id ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        className="w-16 text-xs bg-secondary border border-border rounded px-1.5 py-0.5 text-foreground"
-                        value={editVal}
-                        onChange={e => setEditVal(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(l.id); if (e.key === 'Escape') setEditing(null); }}
-                        autoFocus
-                      />
-                      <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => saveEdit(l.id)}>Save</Button>
-                      <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5" onClick={() => setEditing(null)}>✕</Button>
-                    </div>
-                  ) : (
-                    <>
-                      <span className="text-muted-foreground">Limit: <span className="font-semibold text-foreground">{l.limit}{l.unit}</span></span>
-                      <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5 text-muted-foreground" onClick={() => startEdit(l)}>
-                        <Settings2 className="w-2.5 h-2.5 mr-0.5" /> Edit
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-        <div className="flex gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-200/80 leading-relaxed">
-            <span className="font-semibold text-amber-400">Hard Rules</span> cannot be bypassed.{' '}
-            <span className="font-semibold text-amber-400">Soft Rules</span> generate warnings and require acknowledgment.
-            Override of any rule requires written rationale and creates an audit entry.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+function statusClass(status: string) {
+  if (status === "ok") return "bg-emerald-500";
+  if (status === "warning") return "bg-amber-500";
+  return "bg-destructive";
 }
 
-// ─── Tab 3: Pre-Trade Rules ───────────────────────────────────────────────────
-
-function PreTradeTab() {
-  const [toggles, setToggles] = useState<Record<string, boolean>>(
-    Object.fromEntries(PRE_TRADE_ITEMS.map(i => [i.id, true]))
-  );
-
-  const flip = (id: string) => setToggles(prev => ({ ...prev, [id]: !prev[id] }));
-
-  return (
-    <div className="p-6 space-y-6">
-      {/* Required Pre-Trade Evidence */}
-      <div className="rounded-xl border bg-card shadow-sm p-5">
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-          <FileText className="w-4 h-4" /> Required Pre-Trade Evidence
-        </h2>
-        <div className="space-y-2">
-          {PRE_TRADE_ITEMS.map(item => (
-            <div key={item.id} className={cn(
-              'flex items-center justify-between p-3 rounded-lg border hover:bg-secondary/20 transition-colors',
-              toggles[item.id] ? 'border-border bg-secondary/10' : 'border-border/40 opacity-60'
-            )}>
-              <div className="flex items-center gap-3">
-                <Toggle enabled={toggles[item.id]} onToggle={() => flip(item.id)} />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{item.label}</span>
-                    <span className={cn(
-                      'text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border',
-                      item.required
-                        ? 'bg-destructive/10 text-destructive border-destructive/20'
-                        : 'bg-secondary text-muted-foreground border-border'
-                    )}>
-                      {item.required ? 'REQUIRED' : 'OPTIONAL'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{item.desc}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Hallucination Protections */}
-      <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 shadow-sm p-5">
-        <h2 className="font-semibold text-sm text-blue-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-blue-400" /> AI Data Integrity Checks — Hallucination Protections
-        </h2>
-        <div className="space-y-2.5">
-          {[
-            'Unverifiable data is always labeled [UNKNOWN] — never fabricated',
-            'AI Copilot will never invent analyst ratings, filings, news, or corporate actions',
-            'All AI responses are clearly separated into [VERIFIED DATA] and [INFERENCE]',
-            'Sources are always cited — if a source cannot be named, the claim is withdrawn',
-            'Confidence level is always stated: High / Medium / Low / Speculative',
-            'Any figure that cannot be verified from in-app data is flagged as unconfirmed',
-          ].map((rule, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <CheckCircle2 className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-              <span className="text-foreground/80">{rule}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function asNumber(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
-
-// ─── Tab 4: Bias & Psychology ─────────────────────────────────────────────────
-
-function BiasTab() {
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(
-    Object.fromEntries(BIASES.map(b => [b.id, true]))
-  );
-
-  const flip = (id: string) => setEnabled(prev => ({ ...prev, [id]: !prev[id] }));
-
-  return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-2">
-          <Brain className="w-4 h-4" /> Cognitive Bias Checks
-        </h2>
-        <p className="text-xs text-muted-foreground mb-4">Guardian Mode monitors all trade actions against these psychological patterns in real time.</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {BIASES.map(bias => (
-            <div key={bias.id} className={cn(
-              'rounded-xl border bg-card shadow-sm p-4 space-y-2 transition-opacity',
-              !enabled[bias.id] && 'opacity-50'
-            )}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-semibold text-sm">{bias.name}</span>
-                  <p className="text-xs text-muted-foreground mt-0.5">{bias.desc}</p>
-                </div>
-                <Toggle enabled={enabled[bias.id]} onToggle={() => flip(bias.id)} />
-              </div>
-              <div className="pt-2 border-t border-border/40">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Detected when: </span>
-                <span className="text-xs text-foreground/70">{bias.detected}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Recent Bias Flags */}
-      <div className="rounded-xl border bg-card shadow-sm p-5">
-        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4" /> Recent Bias Flags (Last 30 Days)
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-[11px] text-muted-foreground uppercase tracking-wider">
-                <th className="text-left pb-2 font-medium">Date</th>
-                <th className="text-left pb-2 font-medium">Ticker</th>
-                <th className="text-left pb-2 font-medium">Action</th>
-                <th className="text-left pb-2 font-medium">Bias Detected</th>
-                <th className="text-left pb-2 font-medium">Overridden?</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {BIAS_FLAGS.map((f, i) => (
-                <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                  <td className="py-2.5 text-xs font-mono text-muted-foreground">{f.date}</td>
-                  <td className="py-2.5 font-bold">{f.ticker}</td>
-                  <td className="py-2.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-secondary px-2 py-0.5 rounded border border-border">{f.action}</span>
-                  </td>
-                  <td className="py-2.5">
-                    <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">{f.bias}</span>
-                  </td>
-                  <td className="py-2.5">
-                    {f.overridden
-                      ? <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">YES</span>
-                      : <span className="text-xs text-muted-foreground">No — heeded</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Tab 5: Audit Trail ───────────────────────────────────────────────────────
-
-function AuditTab() {
-  const [decisionFilter, setDecisionFilter] = useState('all');
-  const [tickerFilter, setTickerFilter] = useState('');
-  const [expandedRow, setExpandedRow] = useState<string | null>(null);
-
-  const filtered = AUDIT_DATA.filter(row => {
-    const matchTicker = tickerFilter === '' || row.ticker.toLowerCase().includes(tickerFilter.toLowerCase());
-    const matchDecision =
-      decisionFilter === 'all' ||
-      (decisionFilter === 'approved' && row.decision === 'APPROVED') ||
-      (decisionFilter === 'warnings' && row.decision === 'APPROVED_WARNINGS') ||
-      (decisionFilter === 'rejected' && row.decision === 'REJECTED') ||
-      (decisionFilter === 'overridden' && row.override);
-    return matchTicker && matchDecision;
-  });
-
-  return (
-    <div className="p-6 space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex gap-1.5 flex-wrap">
-          {[
-            { val: 'all', label: 'All' },
-            { val: 'approved', label: 'Approved' },
-            { val: 'warnings', label: 'Warnings' },
-            { val: 'rejected', label: 'Rejected' },
-            { val: 'overridden', label: 'Overridden' },
-          ].map(f => (
-            <button
-              key={f.val}
-              onClick={() => setDecisionFilter(f.val)}
-              className={cn(
-                'text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors',
-                decisionFilter === f.val
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'bg-secondary text-muted-foreground border-border hover:bg-secondary/80'
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <input
-          placeholder="Filter by ticker..."
-          value={tickerFilter}
-          onChange={e => setTickerFilter(e.target.value)}
-          className="ml-auto text-xs bg-secondary border border-border rounded-lg px-3 py-1.5 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-40"
-        />
-      </div>
-
-      {/* Table */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30 text-[11px] text-muted-foreground uppercase tracking-wider">
-                <th className="text-left p-3 font-medium">Timestamp</th>
-                <th className="text-left p-3 font-medium">Ticker</th>
-                <th className="text-left p-3 font-medium">Action</th>
-                <th className="text-left p-3 font-medium">Decision</th>
-                <th className="text-left p-3 font-medium">Breached Rules</th>
-                <th className="text-center p-3 font-medium">Score</th>
-                <th className="text-center p-3 font-medium">Override</th>
-                <th className="text-left p-3 font-medium">Final Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40">
-              {filtered.map(row => (
-                <>
-                  <tr
-                    key={row.id}
-                    onClick={() => row.override && setExpandedRow(expandedRow === row.id ? null : row.id)}
-                    className={cn(
-                      'hover:bg-secondary/20 transition-colors',
-                      row.override && 'cursor-pointer',
-                      expandedRow === row.id && 'bg-secondary/30'
-                    )}
-                  >
-                    <td className="p-3 text-xs font-mono text-muted-foreground whitespace-nowrap">{row.timestamp}</td>
-                    <td className="p-3 font-bold">{row.ticker}</td>
-                    <td className="p-3">
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-secondary px-2 py-0.5 rounded border border-border">{row.action}</span>
-                    </td>
-                    <td className="p-3"><DecisionBadge decision={row.decision} /></td>
-                    <td className="p-3">
-                      {row.breachedRules.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {row.breachedRules.map((r, i) => (
-                            <span key={i} className="block text-[10px] text-destructive/80">{r}</span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3 text-center">
-                      <span className={cn(
-                        'text-xs font-bold font-mono',
-                        row.researchScore >= 70 ? 'text-emerald-400' :
-                        row.researchScore >= 50 ? 'text-amber-400' : 'text-destructive'
-                      )}>{row.researchScore}</span>
-                    </td>
-                    <td className="p-3 text-center">
-                      {row.override ? (
-                        <div className="flex items-center justify-center gap-1">
-                          <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">YES</span>
-                          {expandedRow === row.id ? <ChevronDown className="w-3 h-3 text-muted-foreground" /> : <ChevronRight className="w-3 h-3 text-muted-foreground" />}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">No</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-xs text-muted-foreground">{row.finalAction}</td>
-                  </tr>
-                  {row.override && expandedRow === row.id && (
-                    <tr key={`${row.id}-expand`} className="bg-amber-500/5 border-t border-amber-500/20">
-                      <td colSpan={8} className="p-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 mb-1">
-                            <ShieldX className="w-4 h-4 text-amber-400" />
-                            <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Override Details</span>
-                            <span className="text-xs text-muted-foreground font-mono ml-2">{row.overrideTime}</span>
-                          </div>
-                          <p className="text-sm text-foreground/80 leading-relaxed border-l-2 border-amber-500/40 pl-3">"{row.overrideRationale}"</p>
-                          {row.breachedRules.length > 0 && (
-                            <div className="mt-2">
-                              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Hard/Soft Rules Overridden: </span>
-                              <span className="text-xs text-destructive">{row.breachedRules.join(', ')}</span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filtered.length === 0 && (
-          <div className="py-12 text-center text-muted-foreground text-sm">No audit records match the current filters.</div>
-        )}
-      </div>
-
-      {/* Export */}
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" className="gap-2 text-xs">
-          <Download className="w-3.5 h-3.5" /> Export Audit Trail (CSV)
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function Guardrails() {
-  const [guardianActive, setGuardianActive] = useState(true);
-
+  const [tab, setTab] = useState("overview");
   return (
-    <div className="space-y-6 h-full flex flex-col max-w-6xl mx-auto">
-      {/* Page Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div className="space-y-6 max-w-[1600px] mx-auto">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-3xl font-bold tracking-tight">Guardian Mode & Guardrails</h1>
-            <span className={cn(
-              'text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border',
-              guardianActive
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-            )}>
-              {guardianActive ? '● ACTIVE' : '⏸ PAUSED'}
-            </span>
+          <div className="flex items-center gap-3">
+            <Shield className="h-8 w-8 text-primary" />
+            <h1 className="text-3xl font-bold tracking-tight">Guardian Mode</h1>
           </div>
-          <p className="text-muted-foreground text-sm">Institutional risk controls and decision discipline framework</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Pre-trade policy, behavioural checks, stress testing and an immutable decision trail.
+          </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            'gap-2 border',
-            guardianActive
-              ? 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'
-              : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'
-          )}
-          onClick={() => setGuardianActive(v => !v)}
-        >
-          {guardianActive ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          {guardianActive ? 'Pause Guardian Mode' : 'Resume Guardian Mode'}
-        </Button>
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-500">
+          Guardian records decisions. It never places a brokerage order.
+        </div>
       </div>
 
-      {/* Paused Banner */}
-      {!guardianActive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-center gap-3">
-          <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-amber-400">Guardian Mode is Paused</p>
-            <p className="text-xs text-amber-200/70">All pre-trade checks and guardrails are temporarily disabled. Resume to restore institutional risk controls.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <Tabs defaultValue="overview" className="w-full flex-1 flex flex-col">
-        <TabsList className="w-full justify-start h-auto p-1 bg-secondary rounded-lg flex-wrap">
-          <TabsTrigger value="overview" className="text-xs sm:text-sm py-2 px-4 flex gap-2 items-center">
-            <Shield className="w-3.5 h-3.5" /> Overview
-          </TabsTrigger>
-          <TabsTrigger value="limits" className="text-xs sm:text-sm py-2 px-4 flex gap-2 items-center">
-            <ShieldAlert className="w-3.5 h-3.5" /> Portfolio Limits
-          </TabsTrigger>
-          <TabsTrigger value="pretrade" className="text-xs sm:text-sm py-2 px-4 flex gap-2 items-center">
-            <FileText className="w-3.5 h-3.5" /> Pre-Trade Rules
-          </TabsTrigger>
-          <TabsTrigger value="bias" className="text-xs sm:text-sm py-2 px-4 flex gap-2 items-center">
-            <Brain className="w-3.5 h-3.5" /> Bias & Psychology
-          </TabsTrigger>
-          <TabsTrigger value="audit" className="text-xs sm:text-sm py-2 px-4 flex gap-2 items-center">
-            <FileText className="w-3.5 h-3.5" /> Audit Trail
-          </TabsTrigger>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 md:grid-cols-5">
+          <TabsTrigger value="overview"><Gauge className="mr-2 h-4 w-4" />Health</TabsTrigger>
+          <TabsTrigger value="pretrade"><LockKeyhole className="mr-2 h-4 w-4" />Pre-trade</TabsTrigger>
+          <TabsTrigger value="stress"><TestTube2 className="mr-2 h-4 w-4" />Stress</TabsTrigger>
+          <TabsTrigger value="audit"><History className="mr-2 h-4 w-4" />Audit</TabsTrigger>
+          <TabsTrigger value="policy"><SlidersHorizontal className="mr-2 h-4 w-4" />Policy</TabsTrigger>
         </TabsList>
-
-        <div className="mt-4 flex-1 bg-card rounded-xl border shadow-sm overflow-auto">
-          <TabsContent value="overview" className="m-0">
-            <OverviewTab />
-          </TabsContent>
-          <TabsContent value="limits" className="m-0">
-            <LimitsTab />
-          </TabsContent>
-          <TabsContent value="pretrade" className="m-0">
-            <PreTradeTab />
-          </TabsContent>
-          <TabsContent value="bias" className="m-0">
-            <BiasTab />
-          </TabsContent>
-          <TabsContent value="audit" className="m-0">
-            <AuditTab />
-          </TabsContent>
-        </div>
+        <TabsContent value="overview" className="mt-6"><HealthView onStartCheck={() => setTab("pretrade")} /></TabsContent>
+        <TabsContent value="pretrade" className="mt-6"><PreTradeView /></TabsContent>
+        <TabsContent value="stress" className="mt-6"><StressView /></TabsContent>
+        <TabsContent value="audit" className="mt-6"><AuditView /></TabsContent>
+        <TabsContent value="policy" className="mt-6"><PolicyView /></TabsContent>
       </Tabs>
     </div>
   );
 }
+
+function HealthView({ onStartCheck }: { onStartCheck: () => void }) {
+  const health = useGuardianHealth();
+  if (health.isLoading) {
+    return <div className="grid gap-4 md:grid-cols-3">{[1, 2, 3, 4, 5, 6].map((item) => <Skeleton key={item} className="h-36" />)}</div>;
+  }
+  if (!health.data) return <ErrorCard message={health.error instanceof Error ? health.error.message : "Portfolio health is unavailable."} />;
+  const data = health.data;
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card className="md:col-span-1">
+          <CardContent className="flex h-full flex-col items-center justify-center p-6 text-center">
+            <div className={cn("text-6xl font-black font-mono", healthBandClass(data.band))}>{data.score}</div>
+            <div className="mt-1 text-sm font-semibold uppercase tracking-widest">{data.band.replace("_", " ")}</div>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
+              <div className="h-full rounded-full bg-primary" style={{ width: `${data.score}%` }} />
+            </div>
+          </CardContent>
+        </Card>
+        <Metric title="Portfolio value" value={currency.format(data.portfolio.totalValue)} subtitle={`${data.portfolio.holdingsCount} holdings`} />
+        <Metric title="Cash buffer" value={`${number.format(data.portfolio.cashBufferPct)}%`} subtitle={currency.format(data.portfolio.cashBalance)} warn={data.portfolio.cashBufferPct < 5} />
+        <Metric title="Largest position" value={`${number.format(data.portfolio.largestPositionPct)}%`} subtitle={`Top five: ${number.format(data.portfolio.topFiveConcentrationPct)}%`} />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Health components</CardTitle></CardHeader>
+          <CardContent className="space-y-5">
+            {data.components.map((component) => (
+              <div key={component.key}>
+                <div className="mb-2 flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2"><span className={cn("h-2 w-2 rounded-full", statusClass(component.status))} /><span className="font-medium">{component.name}</span></div>
+                    <p className="mt-1 text-xs text-muted-foreground">{component.description}</p>
+                  </div>
+                  <span className="shrink-0 font-mono text-sm font-bold">{component.score}/{component.maxScore}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={cn("h-full rounded-full", statusClass(component.status))} style={{ width: `${(component.score / component.maxScore) * 100}%` }} /></div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-500" />Top risks</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {data.topRisks.length ? data.topRisks.map((risk, index) => <div key={index} className="rounded-lg border bg-secondary/20 p-3 text-sm">{risk}</div>) : <p className="text-sm text-muted-foreground">No material policy risks detected.</p>}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Data readiness</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <Readiness label="Explicit market-price coverage" value={data.dataQuality.priceCoveragePct} />
+              <Readiness label="Research coverage" value={data.dataQuality.researchCoveragePct} />
+              <Button className="w-full" onClick={onStartCheck}>Start a pre-trade check</Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ title, value, subtitle, warn = false }: { title: string; value: string; subtitle: string; warn?: boolean }) {
+  return <Card><CardContent className="p-6"><p className="text-sm text-muted-foreground">{title}</p><p className={cn("mt-2 text-2xl font-bold font-mono", warn && "text-amber-500")}>{value}</p><p className="mt-1 text-xs text-muted-foreground">{subtitle}</p></CardContent></Card>;
+}
+
+function Readiness({ label, value }: { label: string; value: number }) {
+  return <div><div className="mb-1 flex justify-between"><span className="text-muted-foreground">{label}</span><span className="font-mono">{number.format(value)}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-secondary"><div className={cn("h-full", value >= 90 ? "bg-emerald-500" : value >= 70 ? "bg-amber-500" : "bg-destructive")} style={{ width: `${Math.min(100, value)}%` }} /></div></div>;
+}
+
+function PreTradeView() {
+  const [proposal, setProposal] = useState<GuardianProposalInput>(blankProposal);
+  const [result, setResult] = useState<GuardianCheckResponse | null>(null);
+  const [overrideRationale, setOverrideRationale] = useState("");
+  const context = useGuardianContext(proposal.ticker || undefined);
+  const check = useGuardianCheck();
+  const execute = useExecuteGuardianDecision();
+  const cancel = useCancelGuardianDecision();
+  const holdings = context.data?.portfolio.holdings ?? [];
+
+  useEffect(() => {
+    const holding = context.data?.holding;
+    const research = context.data?.research;
+    if (!proposal.ticker) return;
+    setProposal((current) => ({
+      ...current,
+      name: holding?.name ?? current.name,
+      price: current.price ?? holding?.marketPrice ?? null,
+      targetPrice: current.targetPrice ?? research?.targetPrice ?? null,
+      investmentHorizon: current.investmentHorizon || research?.investmentHorizon || "",
+      maxAcceptableLossPct: current.maxAcceptableLossPct ?? research?.maxAcceptableLossPct ?? null,
+      citedSourceIds: research?.isCovered ? [`research:${proposal.ticker}`] : [],
+    }));
+  }, [proposal.ticker, context.data?.holding, context.data?.research]);
+
+  const submit = () => {
+    setResult(null);
+    check.mutate(proposal, { onSuccess: setResult });
+  };
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)]">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Decision packet</CardTitle></CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Action"><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={proposal.action} onChange={(event) => setProposal({ ...proposal, action: event.target.value as GuardianProposalInput["action"] })}>{["buy", "add", "sell", "trim", "exit", "hold", "review"].map((action) => <option key={action} value={action}>{action.toUpperCase()}</option>)}</select></Field>
+            <Field label="Ticker"><Input list="guardian-tickers" value={proposal.ticker} onChange={(event) => { setResult(null); setProposal({ ...blankProposal, action: proposal.action, ticker: event.target.value.toUpperCase() }); }} placeholder="RELIANCE" /><datalist id="guardian-tickers">{holdings.map((item) => <option key={item.ticker} value={item.ticker}>{item.name}</option>)}</datalist></Field>
+            <Field label="Evidence quality"><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={proposal.evidenceQuality} onChange={(event) => setProposal({ ...proposal, evidenceQuality: event.target.value as "high" | "medium" | "low" })}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-4">
+            <NumericField label="Quantity" value={proposal.quantity} onChange={(value) => setProposal({ ...proposal, quantity: value })} />
+            <NumericField label="Price" value={proposal.price} onChange={(value) => setProposal({ ...proposal, price: value })} />
+            <NumericField label="Fees" value={proposal.fees} onChange={(value) => setProposal({ ...proposal, fees: value })} />
+            <NumericField label="Target price" value={proposal.targetPrice} onChange={(value) => setProposal({ ...proposal, targetPrice: value })} />
+          </div>
+          <Field label="Investment rationale"><Textarea value={proposal.rationale} onChange={(event) => setProposal({ ...proposal, rationale: event.target.value })} placeholder="What changed, why now, and which quantified evidence supports the action?" className="min-h-24" /></Field>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field label="Investment horizon"><Input value={proposal.investmentHorizon} onChange={(event) => setProposal({ ...proposal, investmentHorizon: event.target.value })} placeholder="3 years" /></Field>
+            <NumericField label="Maximum acceptable loss (%)" value={proposal.maxAcceptableLossPct} onChange={(value) => setProposal({ ...proposal, maxAcceptableLossPct: value })} />
+          </div>
+          <Field label="Bear case"><Textarea value={proposal.bearCase} onChange={(event) => setProposal({ ...proposal, bearCase: event.target.value })} placeholder="What could go wrong, and how would it show up in measurable results?" /></Field>
+          <Field label="Thesis invalidation"><Textarea value={proposal.thesisInvalidation} onChange={(event) => setProposal({ ...proposal, thesisInvalidation: event.target.value })} placeholder="Specific conditions that would prove the thesis wrong." /></Field>
+          <Field label="Exit conditions"><Textarea value={proposal.exitConditions} onChange={(event) => setProposal({ ...proposal, exitConditions: event.target.value })} placeholder="Target, time, thesis and risk-based exit rules." /></Field>
+          {context.data?.research && <div className="grid gap-3 rounded-lg border bg-secondary/20 p-4 text-sm sm:grid-cols-4"><ContextItem label="Research" value={`${context.data.research.completenessScore}/100`} /><ContextItem label="Thesis" value={context.data.research.thesisStatus} /><ContextItem label="Conviction" value={context.data.research.conviction} /><ContextItem label="5D move" value={context.data.market?.priceChange5dPct == null ? "Unavailable" : `${number.format(context.data.market.priceChange5dPct)}%`} /></div>}
+          <Button onClick={submit} disabled={check.isPending || !proposal.ticker} className="w-full">{check.isPending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Shield className="mr-2 h-4 w-4" />}Run Guardian check</Button>
+          {check.error && <ErrorInline message={check.error.message} />}
+        </CardContent>
+      </Card>
+
+      <div className="space-y-6">
+        {result ? <DecisionResult result={result} overrideRationale={overrideRationale} setOverrideRationale={setOverrideRationale} onExecute={() => execute.mutate({ checkId: result.checkId, userConfirmed: true, overrideRationale: result.requiresOverride ? overrideRationale : undefined })} onCancel={() => cancel.mutate(result.checkId, { onSuccess: () => setResult(null) })} executing={execute.isPending} cancelling={cancel.isPending} executionMessage={execute.data?.message} error={execute.error?.message || cancel.error?.message} /> : <Card><CardContent className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center text-muted-foreground"><Shield className="mb-4 h-12 w-12 opacity-30" /><p className="font-medium text-foreground">No decision packet yet</p><p className="mt-2 max-w-sm text-sm">Complete the proposal and run Guardian. The review uses current Portfolio, Research and Market Intelligence records.</p></CardContent></Card>}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="space-y-2"><span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>{children}</label>; }
+function NumericField({ label, value, onChange }: { label: string; value?: number | null; onChange: (value: number | null) => void }) { return <Field label={label}><Input inputMode="decimal" value={value ?? ""} onChange={(event) => onChange(asNumber(event.target.value))} /></Field>; }
+function ContextItem({ label, value }: { label: string; value: string }) { return <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p><p className="mt-1 font-semibold capitalize">{value}</p></div>; }
+
+function DecisionResult({ result, overrideRationale, setOverrideRationale, onExecute, onCancel, executing, cancelling, executionMessage, error }: { result: GuardianCheckResponse; overrideRationale: string; setOverrideRationale: (value: string) => void; onExecute: () => void; onCancel: () => void; executing: boolean; cancelling: boolean; executionMessage?: string; error?: string }) {
+  const style = decisionStyle(result.decision);
+  const Icon = style.icon;
+  return <>
+    <Card className={cn("border-2", style.className)}><CardContent className="p-6"><div className="flex items-start gap-4"><Icon className="mt-1 h-9 w-9 shrink-0" /><div><Badge variant="outline" className={style.className}>{style.label}</Badge><h2 className="mt-3 text-xl font-bold">{result.summary}</h2><p className="mt-2 text-xs opacity-80">Valid until {new Date(result.expiresAt).toLocaleTimeString("en-IN")}</p></div></div></CardContent></Card>
+    <Card><CardHeader><CardTitle className="text-base">Projected portfolio state</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><MetricMini label="Trade notional" value={currency.format(result.projected.tradeNotional)} /><MetricMini label="Cash after action" value={currency.format(result.projected.cashBalance)} /><MetricMini label="Stock allocation" value={`${number.format(result.projected.stockAllocationPct)}%`} /><MetricMini label="Sector allocation" value={`${number.format(result.projected.sectorAllocationPct)}%`} /></CardContent></Card>
+    {(result.hardRuleBreaches.length > 0 || result.softRuleWarnings.length > 0 || result.preTradeFailures.length > 0) && <Card><CardHeader><CardTitle className="text-base">Policy findings</CardTitle></CardHeader><CardContent className="space-y-3">{result.hardRuleBreaches.map((item) => <Finding key={item.ruleId} tone="bad" title={item.ruleName} detail={item.message} />)}{result.preTradeFailures.map((item) => <Finding key={item.field} tone="info" title={item.field} detail={item.message} />)}{result.softRuleWarnings.map((item) => <Finding key={item.ruleId} tone="warn" title={item.ruleName} detail={item.message} />)}</CardContent></Card>}
+    {result.biasFlags.some((item) => item.detected) && <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><Brain className="h-4 w-4" />Behavioural flags</CardTitle></CardHeader><CardContent className="space-y-3">{result.biasFlags.filter((item) => item.detected).map((item) => <Finding key={item.bias} tone="warn" title={item.bias} detail={item.description} />)}</CardContent></Card>}
+    {result.requiresOverride && result.canOverride && <Card className="border-destructive/30"><CardHeader><CardTitle className="text-base text-destructive">Override rationale</CardTitle></CardHeader><CardContent><Textarea value={overrideRationale} onChange={(event) => setOverrideRationale(event.target.value)} placeholder="Explain the exceptional evidence, risk accepted and compensating action. Minimum 30 characters." /></CardContent></Card>}
+    <div className="flex gap-3"><Button variant="outline" className="flex-1" onClick={onCancel} disabled={cancelling}>{cancelling ? "Cancelling…" : "Cancel"}</Button><Button className="flex-1" onClick={onExecute} disabled={executing || result.decision === "require_evidence" || (result.requiresOverride && overrideRationale.trim().length < 30)}>{executing ? "Logging…" : result.requiresOverride ? "Override and log" : "Confirm and log"}</Button></div>
+    {executionMessage && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-500">{executionMessage}</div>}{error && <ErrorInline message={error} />}
+  </>;
+}
+
+function MetricMini({ label, value }: { label: string; value: string }) { return <div className="rounded-lg border bg-secondary/20 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-mono font-bold">{value}</p></div>; }
+function Finding({ tone, title, detail }: { tone: "bad" | "warn" | "info"; title: string; detail: string }) { const Icon = tone === "bad" ? XCircle : tone === "warn" ? AlertTriangle : FileCheck2; return <div className={cn("flex gap-3 rounded-lg border p-3", tone === "bad" ? "border-destructive/30 bg-destructive/5" : tone === "warn" ? "border-amber-500/30 bg-amber-500/5" : "border-blue-500/30 bg-blue-500/5")}><Icon className={cn("mt-0.5 h-4 w-4 shrink-0", tone === "bad" ? "text-destructive" : tone === "warn" ? "text-amber-500" : "text-blue-500")} /><div><p className="text-sm font-semibold capitalize">{title}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></div></div>; }
+
+function StressView() {
+  const packets = useGuardianPackets(20);
+  const latest = packets.data?.entries.find((packet) => packet.result?.stressTestResults?.length);
+  if (packets.isLoading) return <Skeleton className="h-96" />;
+  if (!latest) return <Card><CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center"><TestTube2 className="mb-4 h-10 w-10 text-muted-foreground" /><p className="font-medium">No stress-test run yet</p><p className="mt-2 text-sm text-muted-foreground">Run a buy or add proposal in Pre-trade. Guardian will retain the scenario results with the decision packet.</p></CardContent></Card>;
+  return <div className="space-y-6"><Card><CardHeader><CardTitle className="text-base">Latest scenario set — {latest.ticker}</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{latest.result.stressTestResults.map((item) => <div key={item.scenario} className="rounded-xl border bg-secondary/10 p-4"><div className="flex items-start justify-between gap-3"><p className="font-semibold">{item.scenario}</p><Badge variant="outline" className={cn(item.severity === "critical" || item.severity === "high" ? "text-destructive" : item.severity === "medium" ? "text-amber-500" : "text-emerald-500")}>{item.severity}</Badge></div><div className="mt-4 grid grid-cols-2 gap-3"><MetricMini label="Portfolio" value={`${number.format(item.portfolioImpactPct)}%`} /><MetricMini label="Position" value={`${number.format(item.positionImpactPct)}%`} /></div><p className="mt-3 text-xs text-muted-foreground">{item.methodology}</p></div>)}</CardContent></Card><div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4 text-sm text-blue-400">These are transparent deterministic sensitivity scenarios—not forecasts, VaR estimates or live derivatives models.</div></div>;
+}
+
+function AuditView() {
+  const packets = useGuardianPackets(100);
+  const audit = useGuardianAudit(100);
+  const rows = packets.data?.entries ?? [];
+  if (packets.isLoading || audit.isLoading) return <Skeleton className="h-[500px]" />;
+  return <div className="space-y-6"><div className="grid gap-4 md:grid-cols-4"><Metric title="Decision packets" value={String(rows.length)} subtitle="Latest 100" /><Metric title="Executed" value={String(rows.filter((item) => item.status === "executed").length)} subtitle="Normal confirmations" /><Metric title="Overrides" value={String(rows.filter((item) => item.status === "overridden").length)} subtitle="Blocked actions overridden" warn={rows.some((item) => item.status === "overridden")} /><Metric title="Cancelled" value={String(rows.filter((item) => item.status === "cancelled").length)} subtitle="User stopped action" /></div><Card><CardHeader><CardTitle className="text-base">Immutable decision packets</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[900px] text-left text-sm"><thead className="border-y bg-secondary/30 text-xs text-muted-foreground"><tr><th className="px-4 py-3">Time</th><th className="px-4 py-3">Ticker</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Decision</th><th className="px-4 py-3">Research</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Findings</th></tr></thead><tbody className="divide-y">{rows.map((packet) => { const style = decisionStyle(packet.result.decision); return <tr key={packet.id} className="hover:bg-secondary/20"><td className="px-4 py-3 text-xs text-muted-foreground">{new Date(packet.createdAt).toLocaleString("en-IN")}</td><td className="px-4 py-3 font-bold">{packet.ticker}</td><td className="px-4 py-3 uppercase">{packet.action}</td><td className="px-4 py-3"><Badge variant="outline" className={style.className}>{style.label}</Badge></td><td className="px-4 py-3 font-mono">{packet.result.researchCompletenessScore}/100</td><td className="px-4 py-3 capitalize">{packet.status.replace("_", " ")}</td><td className="px-4 py-3 text-xs text-muted-foreground">{packet.result.hardRuleBreaches.length} hard · {packet.result.softRuleWarnings.length} warning · {packet.result.biasFlags.filter((item) => item.detected).length} bias</td></tr>; })}</tbody></table></CardContent></Card></div>;
+}
+
+function PolicyView() {
+  const settingsQuery = useGuardianSettings();
+  const update = useUpdateGuardianSettings();
+  const [settings, setSettings] = useState<GuardianSettings | null>(null);
+  useEffect(() => { if (settingsQuery.data?.settings) setSettings(settingsQuery.data.settings); }, [settingsQuery.data?.settings]);
+  if (settingsQuery.isLoading || !settings) return <Skeleton className="h-[500px]" />;
+  const setLimit = (key: keyof GuardianSettings["portfolioLimits"], value: number | null) => setSettings({ ...settings, portfolioLimits: { ...settings.portfolioLimits, [key]: value ?? 0 } });
+  const setRequirement = (key: keyof GuardianSettings["preTradeRequirements"], value: boolean | number) => setSettings({ ...settings, preTradeRequirements: { ...settings.preTradeRequirements, [key]: value } });
+  return <div className="space-y-6"><div className="grid gap-6 xl:grid-cols-2"><Card><CardHeader><CardTitle className="text-base">Portfolio limits</CardTitle></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2"><PolicyNumber label="Maximum stock concentration (%)" value={settings.portfolioLimits.maxStockConcentrationPct} onChange={(value) => setLimit("maxStockConcentrationPct", value)} /><PolicyNumber label="Maximum sector concentration (%)" value={settings.portfolioLimits.maxSectorConcentrationPct} onChange={(value) => setLimit("maxSectorConcentrationPct", value)} /><PolicyNumber label="Minimum cash buffer (%)" value={settings.portfolioLimits.minCashBufferPct} onChange={(value) => setLimit("minCashBufferPct", value)} /><PolicyNumber label="Maximum small-cap exposure (%)" value={settings.portfolioLimits.maxSmallCapExposurePct} onChange={(value) => setLimit("maxSmallCapExposurePct", value)} /><PolicyNumber label="Maximum correlated positions" value={settings.portfolioLimits.maxCorrelatedPositions} onChange={(value) => setLimit("maxCorrelatedPositions", value)} /><PolicyNumber label="Maximum weekly new positions" value={settings.portfolioLimits.maxWeeklyNewPositions} onChange={(value) => setLimit("maxWeeklyNewPositions", value)} /><PolicyNumber label="Maximum portfolio drawdown (%)" value={settings.portfolioLimits.maxPortfolioDrawdownPct} onChange={(value) => setLimit("maxPortfolioDrawdownPct", value)} /></CardContent></Card><Card><CardHeader><CardTitle className="text-base">Evidence requirements</CardTitle></CardHeader><CardContent className="space-y-3">{([ ["requireRationale", "Investment rationale"], ["requireInvestmentHorizon", "Investment horizon"], ["requireBearCase", "Bear case"], ["requireTargetPrice", "Target price"], ["requireThesisInvalidation", "Thesis invalidation"], ["requireMaxAcceptableLoss", "Maximum acceptable loss"], ["requireExitConditions", "Exit conditions"] ] as const).map(([key, label]) => <PolicyToggle key={key} label={label} enabled={settings.preTradeRequirements[key]} onToggle={() => setRequirement(key, !settings.preTradeRequirements[key])} />)}<PolicyNumber label="Minimum research completeness" value={settings.preTradeRequirements.minResearchCompletenessScore} onChange={(value) => setRequirement("minResearchCompletenessScore", value ?? 0)} /></CardContent></Card></div><Card><CardHeader><CardTitle className="text-base">Guardian controls</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-3"><PolicyToggle label="Guardian Mode enabled" enabled={settings.guardianMode.enabled} onToggle={() => setSettings({ ...settings, guardianMode: { ...settings.guardianMode, enabled: !settings.guardianMode.enabled } })} /><PolicyToggle label="Allow reasoned overrides" enabled={settings.guardianMode.allowOverrideWithRationale} onToggle={() => setSettings({ ...settings, guardianMode: { ...settings.guardianMode, allowOverrideWithRationale: !settings.guardianMode.allowOverrideWithRationale } })} /><PolicyToggle label="Require audit logging" enabled={settings.guardianMode.requireAuditLog} onToggle={() => setSettings({ ...settings, guardianMode: { ...settings.guardianMode, requireAuditLog: !settings.guardianMode.requireAuditLog } })} /></CardContent></Card><Button onClick={() => update.mutate(settings)} disabled={update.isPending}>{update.isPending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save Guardian policy</Button>{update.isSuccess && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-500">Policy saved.</div>}{update.error && <ErrorInline message={update.error.message} />}</div>;
+}
+
+function PolicyNumber({ label, value, onChange }: { label: string; value: number; onChange: (value: number | null) => void }) { return <NumericField label={label} value={value} onChange={onChange} />; }
+function PolicyToggle({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) { return <button type="button" onClick={onToggle} className="flex w-full items-center justify-between rounded-lg border bg-secondary/10 p-3 text-left"><span className="text-sm font-medium">{label}</span><span className={cn("relative h-6 w-11 rounded-full transition-colors", enabled ? "bg-emerald-500" : "bg-secondary")}><span className={cn("absolute top-1 h-4 w-4 rounded-full bg-white transition-transform", enabled ? "translate-x-6" : "translate-x-1")} /></span></button>; }
+
+function ErrorInline({ message }: { message: string }) { return <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{message}</div>; }
+function ErrorCard({ message }: { message: string }) { return <Card><CardContent className="flex min-h-60 flex-col items-center justify-center p-8 text-center"><ShieldX className="mb-4 h-10 w-10 text-destructive" /><p className="font-semibold">Guardian could not load</p><p className="mt-2 text-sm text-muted-foreground">{message}</p></CardContent></Card>; }

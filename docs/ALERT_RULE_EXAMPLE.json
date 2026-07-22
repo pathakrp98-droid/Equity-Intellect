@@ -1,0 +1,10 @@
+{
+  "name": "Reliance above target",
+  "ticker": "RELIANCE",
+  "ruleType": "price_above",
+  "severity": "medium",
+  "threshold": 3000,
+  "cooldownMinutes": 1440,
+  "isEnabled": true,
+  "config": {}
+}
