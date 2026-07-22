@@ -25,13 +25,13 @@ import { cn } from "@/lib/utils";
 import {
   useCreatePortfolioTransaction,
   useDeletePortfolioTransaction,
-  useImportPortfolioCsv,
+  useImportHoldingsCsv,
   usePortfolioOverview,
   usePortfolioTransactions,
   useRecalculatePortfolio,
   useUpdatePortfolioPrices,
   type CreateTransactionPayload,
-  type CsvImportResponse,
+  type HoldingsImportResponse,
   type PortfolioTransaction,
   type TransactionType,
 } from "@/features/portfolio/api";
@@ -116,14 +116,14 @@ export function PortfolioEngine() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            Transaction-ledger portfolio OS
+            Holdings-first portfolio OS
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight">
             {data?.portfolio.name ?? "Portfolio Engine"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Holdings, cash and performance are rebuilt from your actual
-            transactions.
+            Import your current holdings directly. Transactions remain optional for
+            cash-flow, dividend, realised P&L and XIRR analysis.
           </p>
         </div>
         <Button
@@ -153,9 +153,9 @@ export function PortfolioEngine() {
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
           <TabsTrigger value="holdings">Holdings</TabsTrigger>
           <TabsTrigger value="transactions">
-            Transactions ({data?.transactionCount ?? 0})
+            Transactions — optional ({data?.transactionCount ?? 0})
           </TabsTrigger>
-          <TabsTrigger value="import">Import & prices</TabsTrigger>
+          <TabsTrigger value="import">Import holdings</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
         </TabsList>
 
@@ -254,9 +254,8 @@ function HoldingsPanel() {
           <WalletCards className="h-10 w-10 text-muted-foreground" />
           <h2 className="mt-4 text-lg font-semibold">No holdings yet</h2>
           <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Add an opening cash deposit and your first buy transaction, or
-            import a broker tradebook CSV. Holdings will be calculated
-            automatically.
+            Upload your current holdings CSV. No transaction history, deposit,
+            settlement date or tradebook is required.
           </p>
         </CardContent>
       </Card>
@@ -291,9 +290,19 @@ function HoldingsPanel() {
                   <p className="text-xs text-muted-foreground">
                     {holding.name} · {holding.sector}
                   </p>
+                  {holding.isin && (
+                    <p className="text-[11px] text-muted-foreground">
+                      ISIN {holding.isin}
+                    </p>
+                  )}
                 </td>
                 <td className="px-4 py-4 text-right font-mono">
                   {numberFormatter.format(holding.quantity)}
+                  {holding.availableQuantity != null && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Available: {numberFormatter.format(holding.availableQuantity)}
+                    </p>
+                  )}
                 </td>
                 <td className="px-4 py-4 text-right font-mono">
                   {money(holding.averageCost)}
@@ -808,16 +817,13 @@ function Field({
 }
 
 function ImportAndPricesPanel() {
-  const [broker, setBroker] = useState<"manual" | "zerodha" | "groww">(
-    "manual",
-  );
   const [csv, setCsv] = useState("");
   const [fileName, setFileName] = useState("");
-  const [result, setResult] = useState<CsvImportResponse | null>(null);
+  const [result, setResult] = useState<HoldingsImportResponse | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [pricesText, setPricesText] = useState("");
   const [priceError, setPriceError] = useState<string | null>(null);
-  const importer = useImportPortfolioCsv();
+  const importer = useImportHoldingsCsv();
   const priceUpdater = useUpdatePortfolioPrices();
 
   async function pickFile(file: File | undefined) {
@@ -832,7 +838,7 @@ function ImportAndPricesPanel() {
     setImportError(null);
     setResult(null);
     importer.mutate(
-      { broker, csv },
+      { csv },
       {
         onSuccess: (response) => setResult(response),
         onError: (error) => setImportError(errorMessage(error)),
@@ -885,55 +891,53 @@ function ImportAndPricesPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <FileSpreadsheet className="h-4 w-4" /> Import tradebook CSV
+            <FileSpreadsheet className="h-4 w-4" /> Import current holdings CSV
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid grid-cols-[140px_1fr] gap-3">
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={broker}
-              onChange={(event) =>
-                setBroker(event.target.value as "manual" | "zerodha" | "groww")
-              }
-            >
-              <option value="manual">Manual template</option>
-              <option value="zerodha">Zerodha</option>
-              <option value="groww">Groww</option>
-            </select>
-            <label className="flex h-10 cursor-pointer items-center justify-center rounded-md border border-dashed border-input px-3 text-sm hover:bg-secondary/40">
-              <Upload className="mr-2 h-4 w-4" />
-              {fileName || "Choose CSV"}
-              <input
-                className="hidden"
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(event) => void pickFile(event.target.files?.[0])}
-              />
-            </label>
-          </div>
+          <label className="flex h-11 cursor-pointer items-center justify-center rounded-md border border-dashed border-input px-3 text-sm hover:bg-secondary/40">
+            <Upload className="mr-2 h-4 w-4" />
+            {fileName || "Choose holdings CSV"}
+            <input
+              className="hidden"
+              type="file"
+              accept=".csv,text/csv,.tsv,text/tab-separated-values"
+              onChange={(event) => void pickFile(event.target.files?.[0])}
+            />
+          </label>
 
           <a
             className="inline-flex items-center text-sm text-primary hover:underline"
-            href="/api/portfolio/template.csv"
+            href="/api/portfolio/holdings/template.csv"
           >
-            <Download className="mr-2 h-4 w-4" /> Download manual template
+            <Download className="mr-2 h-4 w-4" /> Download holdings template
           </a>
 
           <div className="rounded-lg border bg-secondary/20 p-3 text-xs text-muted-foreground">
-            Imports are idempotent. Re-uploading the same broker rows will be
-            counted as duplicates rather than creating double holdings.
+            AlphaDesk reads Symbol, ISIN, Sector, Quantity, Available Quantity,
+            Long Term Average Price, Previous Closing Price, Unrealized P&amp;L
+            and Unrealized P&amp;L Pct. Header variations, commas, tabs and
+            semicolons are supported. This upload replaces the current holdings
+            snapshot; transaction history is not required.
           </div>
 
           {importError && (
             <p className="text-sm text-destructive">{importError}</p>
           )}
           {result && (
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
-              Imported {result.imported}; skipped {result.duplicates}{" "}
-              duplicates; {result.failed} failed.
+            <div className="space-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
+              <p>
+                Imported {result.imported} holdings; {result.failed} rows failed.
+              </p>
+              {result.warnings.length > 0 && (
+                <ul className="list-disc pl-5 text-xs text-amber-500">
+                  {result.warnings.slice(0, 5).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
               {result.errors.length > 0 && (
-                <ul className="mt-2 list-disc pl-5 text-xs text-muted-foreground">
+                <ul className="list-disc pl-5 text-xs text-muted-foreground">
                   {result.errors.slice(0, 5).map((error) => (
                     <li key={`${error.row}-${error.message}`}>
                       Row {error.row}: {error.message}
@@ -952,7 +956,7 @@ function ImportAndPricesPanel() {
             {importer.isPending && (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             )}
-            Import and rebuild
+            Replace holdings from CSV
           </Button>
         </CardContent>
       </Card>
@@ -963,9 +967,8 @@ function ImportAndPricesPanel() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Enter one security per line as ticker, current price, previous
-            close. Until a quote is entered, AlphaDesk clearly uses the latest
-            transaction price.
+            Previous Closing Price from the holdings CSV is used initially.
+            Enter newer prices as ticker, current price, previous close.
           </p>
           <Textarea
             className="min-h-48 font-mono text-sm"
@@ -1010,7 +1013,7 @@ function AnalyticsPanel() {
     return (
       <Card>
         <CardContent className="py-16 text-center text-sm text-muted-foreground">
-          Analytics will appear after the first transaction is saved.
+          Analytics will appear after holdings are imported.
         </CardContent>
       </Card>
     );

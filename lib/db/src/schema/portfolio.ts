@@ -187,6 +187,36 @@ export const portfolioHoldingsTable = pgTable(
   ],
 );
 
+export const portfolioDirectHoldingsTable = pgTable(
+  "portfolio_direct_holdings",
+  {
+    id: serial("id").primaryKey(),
+    portfolioId: integer("portfolio_id")
+      .notNull()
+      .references(() => portfoliosTable.id, { onDelete: "cascade" }),
+    symbol: varchar("symbol", { length: 30 }).notNull(),
+    isin: varchar("isin", { length: 24 }),
+    name: varchar("name", { length: 160 }),
+    exchange: varchar("exchange", { length: 20 }).notNull().default("NSE"),
+    sector: varchar("sector", { length: 100 }),
+    quantity: doublePrecision("quantity").notNull(),
+    availableQuantity: doublePrecision("available_quantity"),
+    averageCost: doublePrecision("average_cost").notNull(),
+    previousClose: doublePrecision("previous_close").notNull(),
+    reportedUnrealizedPnl: doublePrecision("reported_unrealized_pnl"),
+    reportedUnrealizedPnlPct: doublePrecision("reported_unrealized_pnl_pct"),
+    importedAt: timestamp("imported_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("portfolio_direct_holdings_portfolio_symbol_uidx").on(
+      table.portfolioId,
+      table.symbol,
+    ),
+  ],
+);
+
 export const portfolioCashAccountsTable = pgTable(
   "portfolio_cash_accounts",
   {
@@ -272,6 +302,7 @@ export type PortfolioTransaction = typeof portfolioTransactionsTable.$inferSelec
 export type InsertPortfolioTransaction =
   typeof portfolioTransactionsTable.$inferInsert;
 export type PortfolioMarketPrice = typeof portfolioMarketPricesTable.$inferSelect;
+export type PortfolioDirectHolding = typeof portfolioDirectHoldingsTable.$inferSelect;
 export type PortfolioHolding = typeof portfolioHoldingsTable.$inferSelect;
 export type PortfolioCashAccount = typeof portfolioCashAccountsTable.$inferSelect;
 export type PortfolioSnapshot = typeof portfolioSnapshotsTable.$inferSelect;

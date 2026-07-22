@@ -2,6 +2,7 @@ import {
   brokerAccountsTable,
   db,
   portfolioCashAccountsTable,
+  portfolioDirectHoldingsTable,
   portfolioHoldingsTable,
   portfolioMarketPricesTable,
   portfolioSnapshotsTable,
@@ -23,6 +24,10 @@ import {
   type PortfolioCalculation,
   type PortfolioTransactionType,
 } from "./engine";
+import {
+  buildHoldingsCsvTemplate,
+  parseHoldingsCsv,
+} from "./holdingsCsv";
 
 export interface CreateTransactionInput {
   portfolioId?: number;
@@ -59,6 +64,11 @@ export interface ImportCsvInput {
   portfolioId?: number;
   broker: SupportedBroker;
   accountName?: string;
+  csv: string;
+}
+
+export interface ImportHoldingsCsvInput {
+  portfolioId?: number;
   csv: string;
 }
 
@@ -287,6 +297,79 @@ export class PortfolioService {
     }
   }
 
+
+  async importHoldingsCsv(
+    userId: string,
+    input: ImportHoldingsCsvInput,
+  ) {
+    const portfolio = await this.getPortfolio(userId, input.portfolioId);
+    const parsed = parseHoldingsCsv(input.csv);
+    if (parsed.holdings.length === 0) {
+      throw new Error(
+        parsed.errors[0]?.message ?? "No valid holdings were found in the CSV",
+      );
+    }
+
+    const importedAt = new Date();
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(portfolioDirectHoldingsTable)
+        .where(eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id));
+
+      await tx.insert(portfolioDirectHoldingsTable).values(
+        parsed.holdings.map((holding) => ({
+          portfolioId: portfolio.id,
+          symbol: holding.symbol,
+          isin: holding.isin,
+          name: holding.name,
+          exchange: holding.exchange,
+          sector: holding.sector,
+          quantity: holding.quantity,
+          availableQuantity: holding.availableQuantity,
+          averageCost: holding.averageCost,
+          previousClose: holding.previousClose,
+          reportedUnrealizedPnl: holding.reportedUnrealizedPnl,
+          reportedUnrealizedPnlPct: holding.reportedUnrealizedPnlPct,
+          importedAt,
+        })),
+      );
+
+      for (const holding of parsed.holdings) {
+        await tx
+          .insert(portfolioMarketPricesTable)
+          .values({
+            portfolioId: portfolio.id,
+            ticker: holding.symbol,
+            price: holding.previousClose,
+            previousClose: holding.previousClose,
+            source: "holdings_csv",
+            asOf: importedAt,
+          })
+          .onConflictDoUpdate({
+            target: [
+              portfolioMarketPricesTable.portfolioId,
+              portfolioMarketPricesTable.ticker,
+            ],
+            set: {
+              price: holding.previousClose,
+              previousClose: holding.previousClose,
+              source: "holdings_csv",
+              asOf: importedAt,
+            },
+          });
+      }
+    });
+
+    const calculation = await this.recalculate(userId, portfolio.id);
+    return {
+      imported: parsed.holdings.length,
+      failed: parsed.errors.length,
+      errors: parsed.errors,
+      warnings: parsed.warnings,
+      calculation,
+    };
+  }
+
   async importCsv(userId: string, input: ImportCsvInput) {
     const portfolio = await this.getPortfolio(userId, input.portfolioId);
     const parsed = parsePortfolioCsv(input.csv, input.broker);
@@ -403,7 +486,12 @@ export class PortfolioService {
 
   async recalculate(userId: string, portfolioId?: number): Promise<PortfolioCalculation> {
     const portfolio = await this.getPortfolio(userId, portfolioId);
-    const [transactions, prices, accounts] = await Promise.all([
+    const [directHoldings, transactions, prices, accounts] = await Promise.all([
+      db
+        .select()
+        .from(portfolioDirectHoldingsTable)
+        .where(eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id))
+        .orderBy(asc(portfolioDirectHoldingsTable.id)),
       db
         .select()
         .from(portfolioTransactionsTable)
@@ -419,16 +507,48 @@ export class PortfolioService {
         .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
     ]);
 
-    const brokerNames = new Map(accounts.map((account) => [account.id, account.broker]));
+    const brokerNames = new Map(
+      accounts.map((account) => [account.id, account.broker]),
+    );
+    const openingDate = directHoldings[0]?.importedAt ?? new Date();
+    const openingCost = directHoldings.reduce(
+      (sum, holding) => sum + holding.quantity * holding.averageCost,
+      0,
+    );
+    const directTransactions: EngineTransaction[] =
+      directHoldings.length === 0
+        ? []
+        : [
+            {
+              id: "holdings-opening-deposit",
+              type: "deposit",
+              amount: openingCost,
+              tradeDate: openingDate,
+            },
+            ...directHoldings.map((holding) => ({
+              id: `holding-${holding.id}`,
+              ticker: holding.symbol,
+              name: holding.name,
+              exchange: holding.exchange,
+              sector: holding.sector,
+              type: "buy" as const,
+              quantity: holding.quantity,
+              price: holding.averageCost,
+              tradeDate: openingDate,
+              broker: "holdings_csv",
+            })),
+          ];
     const calculation = calculatePortfolio(
-      transactions.map((transaction) =>
-        asEngineTransaction(
-          transaction,
-          transaction.brokerAccountId
-            ? brokerNames.get(transaction.brokerAccountId)
-            : undefined,
-        ),
-      ),
+      directHoldings.length > 0
+        ? directTransactions
+        : transactions.map((transaction) =>
+            asEngineTransaction(
+              transaction,
+              transaction.brokerAccountId
+                ? brokerNames.get(transaction.brokerAccountId)
+                : undefined,
+            ),
+          ),
       prices.map(asMarketQuote),
       new Date(),
     );
@@ -558,15 +678,20 @@ export class PortfolioService {
 
   async getHoldings(userId: string, portfolioId?: number) {
     const portfolio = await this.getPortfolio(userId, portfolioId);
-    const [holdings, prices, transactions, accounts] = await Promise.all([
-      db
-        .select()
-        .from(portfolioHoldingsTable)
-        .where(eq(portfolioHoldingsTable.portfolioId, portfolio.id))
-        .orderBy(desc(portfolioHoldingsTable.marketValue)),
-      db
-        .select()
-        .from(portfolioMarketPricesTable)
+    const [holdings, directHoldings, prices, transactions, accounts] =
+      await Promise.all([
+        db
+          .select()
+          .from(portfolioHoldingsTable)
+          .where(eq(portfolioHoldingsTable.portfolioId, portfolio.id))
+          .orderBy(desc(portfolioHoldingsTable.marketValue)),
+        db
+          .select()
+          .from(portfolioDirectHoldingsTable)
+          .where(eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id)),
+        db
+          .select()
+          .from(portfolioMarketPricesTable)
         .where(eq(portfolioMarketPricesTable.portfolioId, portfolio.id)),
       db
         .select()
@@ -574,10 +699,13 @@ export class PortfolioService {
         .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id)),
       db
         .select()
-        .from(brokerAccountsTable)
-        .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
-    ]);
+          .from(brokerAccountsTable)
+          .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
+      ]);
 
+    const directByTicker = new Map(
+      directHoldings.map((holding) => [holding.symbol, holding]),
+    );
     const priceSources = new Map(prices.map((price) => [price.ticker, price.source]));
     const accountNames = new Map(accounts.map((account) => [account.id, account.broker]));
     const brokersByTicker = new Map<string, Set<string>>();
@@ -594,10 +722,16 @@ export class PortfolioService {
     return holdings.map((holding) => {
       const previousClose = holding.previousClose ?? holding.marketPrice;
       const dayChange = holding.marketPrice - previousClose;
+      const direct = directByTicker.get(holding.ticker);
       return {
         ...holding,
         name: holding.name ?? holding.ticker,
         sector: holding.sector ?? "Unclassified",
+        isin: direct?.isin ?? null,
+        availableQuantity: direct?.availableQuantity ?? null,
+        reportedUnrealizedPnl: direct?.reportedUnrealizedPnl ?? null,
+        reportedUnrealizedPnlPct: direct?.reportedUnrealizedPnlPct ?? null,
+        sourceType: direct ? "direct" : "ledger",
         unrealizedPnlPct:
           holding.costBasis > 0
             ? (holding.unrealizedPnl / holding.costBasis) * 100
@@ -725,6 +859,10 @@ export class PortfolioService {
         discrepancies: 0,
       };
     });
+  }
+
+  getHoldingsCsvTemplate() {
+    return buildHoldingsCsvTemplate();
   }
 
   getManualCsvTemplate() {

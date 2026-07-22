@@ -76,6 +76,11 @@ export interface PortfolioHolding {
   updatedAt: string;
   priceSource: string;
   brokers: string[];
+  isin: string | null;
+  availableQuantity: number | null;
+  reportedUnrealizedPnl: number | null;
+  reportedUnrealizedPnlPct: number | null;
+  sourceType: "direct" | "ledger";
 }
 
 export interface PortfolioOverview {
@@ -146,6 +151,18 @@ export interface CsvImportResponse {
   duplicates: number;
   failed: number;
   errors: Array<{ row: number; message: string }>;
+}
+
+export interface HoldingsImportResponse {
+  imported: number;
+  failed: number;
+  errors: Array<{ row: number; message: string }>;
+  warnings: string[];
+}
+
+export interface ImportHoldingsCsvPayload {
+  portfolioId?: number;
+  csv: string;
 }
 
 export interface PriceInput {
@@ -242,6 +259,20 @@ export function useDeletePortfolioTransaction() {
   return useMutation({
     mutationFn: (id: number) =>
       apiRequest(`/api/portfolio/transactions/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await refresh();
+    },
+  });
+}
+
+export function useImportHoldingsCsv() {
+  const refresh = useRefreshPortfolio();
+  return useMutation({
+    mutationFn: (payload: ImportHoldingsCsvPayload) =>
+      apiRequest<HoldingsImportResponse>("/api/portfolio/holdings/import", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     onSuccess: async () => {
       await refresh();
     },

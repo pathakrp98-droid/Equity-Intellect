@@ -225,6 +225,36 @@ router.get("/holdings", async (req, res) => {
   }
 });
 
+router.post("/holdings/import", async (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const body = req.body as Record<string, unknown>;
+    if (typeof body.csv !== "string" || !body.csv.trim()) {
+      throw new Error("csv is required");
+    }
+    res.status(201).json(
+      await portfolioService.importHoldingsCsv(userId, {
+        portfolioId: optionalPositiveInteger(body.portfolioId),
+        csv: body.csv,
+      }),
+    );
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/holdings/template.csv", (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  res.type("text/csv");
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="alphadesk-holdings-template.csv"',
+  );
+  res.send(portfolioService.getHoldingsCsvTemplate());
+});
+
 router.get("/transactions", async (req, res) => {
   const userId = requireUserId(req, res);
   if (!userId) return;
