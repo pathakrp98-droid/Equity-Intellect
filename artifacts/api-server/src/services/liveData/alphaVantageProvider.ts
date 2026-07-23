@@ -216,44 +216,71 @@ export class AlphaVantageProvider implements LiveDataProvider {
   }
 
   async fetchQuotes(context: LiveDataProviderContext): Promise<MarketPointInput[]> {
-    const results = await mapSequential(context.symbols, async (symbol) => {
-      const payload = await fetchJson<AlphaVantageQuoteResponse>({
-        function: "GLOBAL_QUOTE",
-        symbol: symbol.providerSymbol,
-      });
-      const quote = payload["Global Quote"] ?? {};
-      const price = finiteNumber(quote["05. price"]);
-      if (price === null) {
-        throw new Error(`Alpha Vantage returned no quote for ${symbol.providerSymbol}`);
+    const results: MarketPointInput[] = [];
+    const failures: string[] = [];
+
+    for (const symbol of context.symbols) {
+      try {
+        const payload = await fetchJson<AlphaVantageQuoteResponse>({
+          function: "GLOBAL_QUOTE",
+          symbol: symbol.providerSymbol,
+        });
+        const quote = payload["Global Quote"] ?? {};
+        const price = finiteNumber(quote["05. price"]);
+        if (price === null || price <= 0) {
+          throw new Error(`no quote returned for ${symbol.providerSymbol}`);
+        }
+        const previousClose = finiteNumber(quote["08. previous close"]);
+        const change = finiteNumber(quote["09. change"]);
+        const changePct = finiteNumber(
+          String(quote["10. change percent"] ?? "").replace("%", ""),
+        );
+        const latestTradingDay = quote["07. latest trading day"];
+
+        results.push({
+          kind: "equity" as const,
+          symbol: symbol.ticker,
+          name: symbol.ticker,
+          value: price,
+          change,
+          changePct,
+          unit: "INR",
+          region: symbol.exchange,
+          source: this.name,
+          sourceUrl: quoteSourceUrl(symbol.providerSymbol),
+          asOf: latestTradingDay
+            ? new Date(`${latestTradingDay}T15:30:00+05:30`)
+            : context.now,
+          metadata: {
+            providerSymbol: symbol.providerSymbol,
+            previousClose,
+            open: finiteNumber(quote["02. open"]),
+            high: finiteNumber(quote["03. high"]),
+            low: finiteNumber(quote["04. low"]),
+            volume: finiteNumber(quote["06. volume"]),
+          },
+        } satisfies MarketPointInput);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "provider request failed";
+        failures.push(`${symbol.ticker} (${symbol.providerSymbol}): ${message}`);
       }
-      const previousClose = finiteNumber(quote["08. previous close"]);
-      const change = finiteNumber(quote["09. change"]);
-      const changePct = finiteNumber(String(quote["10. change percent"] ?? "").replace("%", ""));
-      const latestTradingDay = quote["07. latest trading day"];
-      return {
-        kind: "equity" as const,
-        symbol: symbol.ticker,
-        name: symbol.ticker,
-        value: price,
-        change,
-        changePct,
-        unit: "INR",
-        region: symbol.exchange,
-        source: this.name,
-        sourceUrl: quoteSourceUrl(symbol.providerSymbol),
-        asOf: latestTradingDay
-          ? new Date(`${latestTradingDay}T15:30:00+05:30`)
-          : context.now,
-        metadata: {
-          providerSymbol: symbol.providerSymbol,
-          previousClose,
-          open: finiteNumber(quote["02. open"]),
-          high: finiteNumber(quote["03. high"]),
-          low: finiteNumber(quote["04. low"]),
-          volume: finiteNumber(quote["06. volume"]),
-        },
-      } satisfies MarketPointInput;
-    });
+    }
+
+    if (results.length === 0) {
+      throw new Error(
+        `Alpha Vantage returned no usable quotes. ${failures
+          .slice(0, 5)
+          .join("; ")}`,
+      );
+    }
+
+    if (failures.length > 0) {
+      console.warn(
+        `[alpha-vantage] imported ${results.length} quotes and skipped ${failures.length}: ${failures.join("; ")}`,
+      );
+    }
+
     return results;
   }
 

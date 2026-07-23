@@ -228,7 +228,7 @@ class LiveDataService {
     const mappingByTicker = new Map(mappings.map((mapping) => [mapping.ticker, mapping]));
     const defaultSuffix =
       provider.name === "alpha-vantage"
-        ? process.env.ALPHA_VANTAGE_DEFAULT_SUFFIX?.trim()
+        ? process.env.ALPHA_VANTAGE_DEFAULT_SUFFIX?.trim() || "BSE"
         : undefined;
     return holdings.map((holding) => {
       const ticker = normalizeTicker(holding.ticker);
