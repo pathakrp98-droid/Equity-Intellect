@@ -533,7 +533,7 @@ export class PortfolioService {
               sector: holding.sector,
               type: "buy" as const,
               quantity: holding.quantity,
-              price: holding.averageCost,
+              price: holding.averageCost > 0 ? holding.averageCost : Number.EPSILON,
               tradeDate: openingDate,
               broker: "holdings_csv",
             })),
