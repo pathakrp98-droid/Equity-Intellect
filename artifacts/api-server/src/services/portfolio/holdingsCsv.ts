@@ -54,6 +54,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
   ],
   availableQuantity: [
     "available quantity",
+    "quantity available",
     "available qty",
     "free quantity",
     "sellable quantity",
@@ -376,8 +377,8 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
         "Available Quantity",
       );
       const quantity =
-        parseNumber(getCell(row, headers, "quantity"), "Quantity") ??
-        availableQuantity;
+        availableQuantity ??
+        parseNumber(getCell(row, headers, "quantity"), "Quantity");
       if (quantity === undefined || quantity <= 0) {
         warnings.push(
           `Row ${rowNumber} (${symbol}): skipped because Quantity is zero or missing.`,
