@@ -182,7 +182,84 @@ function parseRows(csv: string): string[][] {
 
 function resolveIndex(headers: string[], field: string): number {
   const aliases = HEADER_ALIASES[field] ?? [];
-  return headers.findIndex((header) => aliases.includes(header));
+  const exactIndex = headers.findIndex((header) => aliases.includes(header));
+  if (exactIndex >= 0) return exactIndex;
+
+  return headers.findIndex((header) => {
+    const value = ` ${header} `;
+    const hasAny = (...terms: string[]) =>
+      terms.some((term) => value.includes(term));
+    const hasAll = (...terms: string[]) =>
+      terms.every((term) => value.includes(term));
+
+    const isQuantity = hasAny("quantity", " qty ");
+    const isPnl =
+      hasAny("unrealized", "unrealised") &&
+      (hasAny("pnl", "p l") || hasAll("profit", "loss"));
+
+    switch (field) {
+      case "symbol":
+        return (
+          hasAny(
+            "symbol",
+            "ticker",
+            "trading symbol",
+            "tradingsymbol",
+            "scrip",
+            "stock code",
+            "security code",
+            "instrument code",
+          ) && !hasAny("isin")
+        );
+      case "isin":
+        return hasAny("isin");
+      case "name":
+        return (
+          hasAll("company", "name") ||
+          hasAll("security", "name") ||
+          hasAll("instrument", "name") ||
+          header === "name"
+        );
+      case "exchange":
+        return hasAny("exchange", "segment");
+      case "sector":
+        return hasAny("sector", "industry");
+      case "availableQuantity":
+        return (
+          isQuantity &&
+          hasAny("available", "free", "sellable", "saleable", "deliverable")
+        );
+      case "quantity":
+        return (
+          isQuantity &&
+          !hasAny(
+            "available",
+            "free",
+            "sellable",
+            "saleable",
+            "blocked",
+            "pledged",
+            "collateral",
+          )
+        );
+      case "averageCost":
+        return (
+          (hasAny("average", " avg ") && hasAny("price", "cost")) ||
+          hasAll("long term", "price")
+        );
+      case "previousClose":
+        return (
+          (hasAny("previous", "prev") && hasAny("close", "closing")) ||
+          header === "closing price"
+        );
+      case "reportedUnrealizedPnl":
+        return isPnl && !hasAny("pct", "percent", "percentage");
+      case "reportedUnrealizedPnlPct":
+        return isPnl && hasAny("pct", "percent", "percentage");
+      default:
+        return false;
+    }
+  });
 }
 
 function getCell(
@@ -230,9 +307,7 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
     throw new Error("CSV must contain a header and at least one holding row");
   }
 
-  const headerIndex = rows
-    .slice(0, Math.min(rows.length, 30))
-    .findIndex((row) => {
+  const headerIndex = rows.findIndex((row) => {
       const candidate = row.map(normalizeHeader);
       const hasIdentifier =
         resolveIndex(candidate, "symbol") >= 0 ||
