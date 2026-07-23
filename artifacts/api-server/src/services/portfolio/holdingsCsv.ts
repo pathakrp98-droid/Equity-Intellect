@@ -379,7 +379,10 @@ export function parseHoldingsCsv(csv: string): HoldingsCsvResult {
         parseNumber(getCell(row, headers, "quantity"), "Quantity") ??
         availableQuantity;
       if (quantity === undefined || quantity <= 0) {
-        throw new Error("Quantity must be greater than zero");
+        warnings.push(
+          `Row ${rowNumber} (${symbol}): skipped because Quantity is zero or missing.`,
+        );
+        continue;
       }
       if (
         availableQuantity !== undefined &&
