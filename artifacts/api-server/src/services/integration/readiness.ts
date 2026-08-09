@@ -112,8 +112,7 @@ export function evaluateIntegrationReadiness(
     blockers.push("Create a portfolio before using the decision workflow.");
   } else {
     portfolioScore += 4;
-    portfolioScore += facts.portfolio.transactions > 0 ? 4 : 0;
-    portfolioScore += facts.portfolio.holdings > 0 ? 4 : 0;
+    portfolioScore += facts.portfolio.holdings > 0 ? 8 : 0;
     portfolioScore += ratioScore(
       facts.portfolio.holdingsWithPrices,
       Math.max(1, facts.portfolio.holdings),
@@ -121,7 +120,6 @@ export function evaluateIntegrationReadiness(
     );
     portfolioScore += facts.portfolio.stalePrices === 0 ? 2 : 0;
     if (
-      facts.portfolio.transactions === 0 ||
       facts.portfolio.holdings === 0 ||
       facts.portfolio.holdingsWithPrices < facts.portfolio.holdings ||
       facts.portfolio.stalePrices > 0
@@ -129,8 +127,8 @@ export function evaluateIntegrationReadiness(
       portfolioStatus = "attention";
     }
   }
-  if (facts.portfolio.portfolios > 0 && facts.portfolio.transactions === 0) {
-    recommendations.push("Import or record portfolio transactions.");
+  if (facts.portfolio.portfolios > 0 && facts.portfolio.holdings === 0) {
+    recommendations.push("Add holdings manually or import a holdings CSV.");
   }
   if (facts.portfolio.holdings > facts.portfolio.holdingsWithPrices) {
     recommendations.push("Refresh missing holding prices.");
@@ -148,7 +146,7 @@ export function evaluateIntegrationReadiness(
       portfolioStatus === "blocked"
         ? "Portfolio setup has not started."
         : portfolioStatus === "ready"
-          ? "Ledger, holdings and prices are ready."
+          ? "Holdings and prices are ready."
           : "Portfolio exists but needs fresher or more complete data.",
       [
         { label: "Holdings", value: facts.portfolio.holdings },

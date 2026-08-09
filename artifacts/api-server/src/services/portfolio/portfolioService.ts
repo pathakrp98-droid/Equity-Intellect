@@ -72,6 +72,19 @@ export interface ImportHoldingsCsvInput {
   csv: string;
 }
 
+export interface DirectHoldingInput {
+  portfolioId?: number;
+  symbol: string;
+  isin?: string | null;
+  name?: string | null;
+  exchange?: string | null;
+  sector?: string | null;
+  quantity: number;
+  availableQuantity?: number | null;
+  averageCost: number;
+  previousClose: number;
+}
+
 function normalizeTicker(value: string | null | undefined): string | null {
   const normalized = value?.trim().toUpperCase();
   return normalized || null;
@@ -486,7 +499,7 @@ export class PortfolioService {
 
   async recalculate(userId: string, portfolioId?: number): Promise<PortfolioCalculation> {
     const portfolio = await this.getPortfolio(userId, portfolioId);
-    const [directHoldings, transactions, prices, accounts] = await Promise.all([
+    const [directHoldings, transactions, prices, accounts, cashAccount] = await Promise.all([
       db
         .select()
         .from(portfolioDirectHoldingsTable)
@@ -505,6 +518,12 @@ export class PortfolioService {
         .select()
         .from(brokerAccountsTable)
         .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
+      db
+        .select()
+        .from(portfolioCashAccountsTable)
+        .where(eq(portfolioCashAccountsTable.portfolioId, portfolio.id))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
     ]);
 
     const brokerNames = new Map(
@@ -551,6 +570,7 @@ export class PortfolioService {
           ),
       prices.map(asMarketQuote),
       new Date(),
+      cashAccount?.isManual ? cashAccount.balance : undefined,
     );
 
     await db.transaction(async (tx) => {
@@ -587,6 +607,7 @@ export class PortfolioService {
           portfolioId: portfolio.id,
           currency: portfolio.baseCurrency,
           balance: calculation.cashBalance,
+          isManual: cashAccount?.isManual ?? false,
           updatedAt: calculation.asOf,
         })
         .onConflictDoUpdate({
@@ -596,6 +617,7 @@ export class PortfolioService {
           ],
           set: {
             balance: calculation.cashBalance,
+            isManual: cashAccount?.isManual ?? false,
             updatedAt: calculation.asOf,
           },
         });
@@ -707,6 +729,7 @@ export class PortfolioService {
       directHoldings.map((holding) => [holding.symbol, holding]),
     );
     const priceSources = new Map(prices.map((price) => [price.ticker, price.source]));
+    const priceTimes = new Map(prices.map((price) => [price.ticker, price.asOf]));
     const accountNames = new Map(accounts.map((account) => [account.id, account.broker]));
     const brokersByTicker = new Map<string, Set<string>>();
     for (const transaction of transactions) {
@@ -732,6 +755,7 @@ export class PortfolioService {
         reportedUnrealizedPnl: direct?.reportedUnrealizedPnl ?? null,
         reportedUnrealizedPnlPct: direct?.reportedUnrealizedPnlPct ?? null,
         sourceType: direct ? "direct" : "ledger",
+        directHoldingId: direct?.id ?? null,
         unrealizedPnlPct:
           holding.costBasis > 0
             ? (holding.unrealizedPnl / holding.costBasis) * 100
@@ -739,9 +763,100 @@ export class PortfolioService {
         dayChange,
         dayChangePct: previousClose > 0 ? (dayChange / previousClose) * 100 : 0,
         priceSource: priceSources.get(holding.ticker) ?? "last_transaction",
+        priceAsOf: priceTimes.get(holding.ticker) ?? null,
+        priceStatus: !priceTimes.has(holding.ticker)
+          ? "missing" as const
+          : Date.now() - priceTimes.get(holding.ticker)!.getTime() > 24 * 60 * 60 * 1000
+            ? "stale" as const
+            : "fresh" as const,
         brokers: [...(brokersByTicker.get(holding.ticker) ?? new Set())],
       };
     });
+  }
+
+  async setCashBalance(userId: string, balance: number, portfolioId?: number) {
+    if (!Number.isFinite(balance) || balance < 0) {
+      throw new Error("balance must be zero or greater");
+    }
+    const portfolio = await this.getPortfolio(userId, portfolioId);
+    const now = new Date();
+    await db.insert(portfolioCashAccountsTable).values({
+      portfolioId: portfolio.id,
+      currency: portfolio.baseCurrency,
+      balance,
+      isManual: true,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [portfolioCashAccountsTable.portfolioId, portfolioCashAccountsTable.currency],
+      set: { balance, isManual: true, updatedAt: now },
+    });
+    return this.recalculate(userId, portfolio.id);
+  }
+
+  async createDirectHolding(userId: string, input: DirectHoldingInput) {
+    const portfolio = await this.getPortfolio(userId, input.portfolioId);
+    const symbol = normalizeTicker(input.symbol);
+    if (!symbol) throw new Error("symbol is required");
+    const [created] = await db.insert(portfolioDirectHoldingsTable).values({
+      portfolioId: portfolio.id,
+      symbol,
+      isin: input.isin?.trim() || null,
+      name: input.name?.trim() || symbol,
+      exchange: input.exchange?.trim().toUpperCase() || "NSE",
+      sector: input.sector?.trim() || "Unclassified",
+      quantity: input.quantity,
+      availableQuantity: input.availableQuantity ?? input.quantity,
+      averageCost: input.averageCost,
+      previousClose: input.previousClose,
+      importedAt: new Date(),
+    }).returning();
+    await db.insert(portfolioMarketPricesTable).values({
+      portfolioId: portfolio.id,
+      ticker: symbol,
+      price: input.previousClose,
+      previousClose: input.previousClose,
+      source: "manual_holding",
+      asOf: new Date(),
+    }).onConflictDoUpdate({
+      target: [portfolioMarketPricesTable.portfolioId, portfolioMarketPricesTable.ticker],
+      set: { price: input.previousClose, previousClose: input.previousClose, source: "manual_holding", asOf: new Date() },
+    });
+    await this.recalculate(userId, portfolio.id);
+    return created;
+  }
+
+  async updateDirectHolding(userId: string, holdingId: number, input: DirectHoldingInput) {
+    const portfolio = await this.getPortfolio(userId, input.portfolioId);
+    const symbol = normalizeTicker(input.symbol);
+    if (!symbol) throw new Error("symbol is required");
+    const [updated] = await db.update(portfolioDirectHoldingsTable).set({
+      symbol,
+      isin: input.isin?.trim() || null,
+      name: input.name?.trim() || symbol,
+      exchange: input.exchange?.trim().toUpperCase() || "NSE",
+      sector: input.sector?.trim() || "Unclassified",
+      quantity: input.quantity,
+      availableQuantity: input.availableQuantity ?? input.quantity,
+      averageCost: input.averageCost,
+      previousClose: input.previousClose,
+    }).where(and(
+      eq(portfolioDirectHoldingsTable.id, holdingId),
+      eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id),
+    )).returning();
+    if (!updated) throw new Error("Holding not found");
+    await db.insert(portfolioMarketPricesTable).values({
+      portfolioId: portfolio.id,
+      ticker: symbol,
+      price: input.previousClose,
+      previousClose: input.previousClose,
+      source: "manual_holding",
+      asOf: new Date(),
+    }).onConflictDoUpdate({
+      target: [portfolioMarketPricesTable.portfolioId, portfolioMarketPricesTable.ticker],
+      set: { price: input.previousClose, previousClose: input.previousClose, source: "manual_holding", asOf: new Date() },
+    });
+    await this.recalculate(userId, portfolio.id);
+    return updated;
   }
 
   async getPerformance(userId: string, portfolioId?: number) {

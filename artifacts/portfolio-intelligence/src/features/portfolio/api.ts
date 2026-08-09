@@ -75,12 +75,15 @@ export interface PortfolioHolding {
   firstTradeDate: string | null;
   updatedAt: string;
   priceSource: string;
+  priceAsOf: string | null;
+  priceStatus: "fresh" | "stale" | "missing";
   brokers: string[];
   isin: string | null;
   availableQuantity: number | null;
   reportedUnrealizedPnl: number | null;
   reportedUnrealizedPnlPct: number | null;
   sourceType: "direct" | "ledger";
+  directHoldingId: number | null;
 }
 
 export interface PortfolioOverview {
@@ -92,6 +95,26 @@ export interface PortfolioOverview {
     quoted: number;
     fallback: number;
   };
+  autoRefresh?: {
+    attempted: boolean;
+    refreshedAt?: string;
+    reason?: "already_refreshed_today" | "no_provider_configured";
+    error?: string;
+    diagnostics?: Array<{ status: string; message?: string }>;
+  };
+}
+
+export interface DirectHoldingPayload {
+  portfolioId?: number;
+  symbol: string;
+  isin?: string;
+  name?: string;
+  exchange?: string;
+  sector?: string;
+  quantity: number;
+  availableQuantity?: number;
+  averageCost: number;
+  previousClose: number;
 }
 
 export interface PortfolioTransaction {
@@ -276,6 +299,40 @@ export function useImportHoldingsCsv() {
     onSuccess: async () => {
       await refresh();
     },
+  });
+}
+
+export function useSetCashBalance() {
+  const refresh = useRefreshPortfolio();
+  return useMutation({
+    mutationFn: (balance: number) => apiRequest("/api/portfolio/cash", {
+      method: "PUT",
+      body: JSON.stringify({ balance }),
+    }),
+    onSuccess: refresh,
+  });
+}
+
+export function useCreateDirectHolding() {
+  const refresh = useRefreshPortfolio();
+  return useMutation({
+    mutationFn: (payload: DirectHoldingPayload) => apiRequest("/api/portfolio/holdings", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+    onSuccess: refresh,
+  });
+}
+
+export function useUpdateDirectHolding() {
+  const refresh = useRefreshPortfolio();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: DirectHoldingPayload }) =>
+      apiRequest(`/api/portfolio/holdings/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: refresh,
   });
 }
 
