@@ -441,7 +441,7 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
       : "no urgent actions",
   ];
   const summaryParts = [
-    `Portfolio value is ${formatMoney(input.portfolio.totalValue)} with ${formatMoney(input.portfolio.cashBalance)} in cash.`,
+    `Portfolio value is ${formatMoney(input.portfolio.totalValue)}.`,
     marketSummary,
     portfolioNews.length > 0
       ? `${portfolioNews.length} portfolio-relevant news item${portfolioNews.length === 1 ? "" : "s"} are in the current feed.`

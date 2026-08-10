@@ -535,9 +535,6 @@ export function calculatePortfolio(
         : "low";
 
   const riskFlags: string[] = [];
-  if (cashBalance < -EPSILON) {
-    riskFlags.push("Cash balance is negative; imported funding transactions may be incomplete.");
-  }
   if (largestPositionPct > 20 && largestPosition) {
     riskFlags.push(
       `${largestPosition.ticker} is ${largestPositionPct.toFixed(1)}% of total portfolio value.`,
@@ -550,9 +547,6 @@ export function calculatePortfolio(
     riskFlags.push(
       `${concentratedSector.sector} is ${concentratedSector.allocationPct.toFixed(1)}% of invested assets.`,
     );
-  }
-  if (totalValue > EPSILON && (cashBalance / totalValue) * 100 < 5) {
-    riskFlags.push("Cash buffer is below 5% of total portfolio value.");
   }
   const stalePriceTickers = holdings
     .filter((holding) => holding.priceSource === "last_transaction")

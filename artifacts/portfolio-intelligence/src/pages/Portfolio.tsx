@@ -506,10 +506,6 @@ function BrokersTab() {
                 <span className="font-mono font-medium">{formatCurrency(broker.totalValue)}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-sm text-muted-foreground">Cash Balance</span>
-                <span className="font-mono font-medium">{formatCurrency(broker.cashBalance)}</span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
                 <span className="text-sm text-muted-foreground">Holdings Count</span>
                 <span className="font-mono font-medium">{broker.holdingsCount}</span>
               </div>

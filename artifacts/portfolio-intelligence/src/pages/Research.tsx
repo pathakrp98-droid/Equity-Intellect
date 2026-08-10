@@ -910,7 +910,7 @@ function ThesisEditor({ data }: { data: ResearchWorkspace }) {
 
       <Field
         label="Core thesis"
-        hint="State what the market is missing, the earnings or cash-flow driver, and why the gap should close."
+        hint="State what the market is missing, the earnings driver, and why the gap should close."
       >
         <Textarea
           className="min-h-32"

@@ -127,7 +127,7 @@ export function PortfolioEngine() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Import your current holdings directly. Transactions remain optional for
-            cash-flow, dividend, realised P&L and XIRR analysis.
+            dividend, realised P&L and XIRR analysis.
           </p>
         </div>
         <Button
@@ -212,7 +212,7 @@ function SummaryCards({
       label: "XIRR",
       value: xirrPct === null ? "—" : percent(xirrPct),
       detail:
-        xirrPct === null ? "Add deposits for XIRR" : "Money-weighted return",
+        xirrPct === null ? "Requires dated transactions" : "Money-weighted return",
       positive: (xirrPct ?? 0) >= 0,
     },
   ];
@@ -536,8 +536,6 @@ function TransactionsPanel({
                   {[
                     "buy",
                     "sell",
-                    "deposit",
-                    "withdrawal",
                     "dividend",
                     "bonus",
                     "split",
@@ -817,7 +815,7 @@ function TransactionsPanel({
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium">
-                        {transaction.ticker ?? "Cash"}
+                        {transaction.ticker ?? "Portfolio adjustment"}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {transaction.name ?? transaction.notes ?? ""}
@@ -1129,10 +1127,10 @@ function AnalyticsPanel() {
             <Metric label="Top five" value={percent(topFive)} />
             <Metric label="Holdings" value={String(snapshot.holdingsCount)} />
             <Metric
-              label="Cash weight"
+              label="Market value"
               value={
                 snapshot.totalValue > 0
-                  ? percent((snapshot.cashBalance / snapshot.totalValue) * 100)
+                  ? money(snapshot.marketValue)
                   : "—"
               }
             />
@@ -1149,7 +1147,7 @@ function AnalyticsPanel() {
           <CardContent>
             {snapshot.riskFlags.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No basic concentration or cash-buffer flags are active.
+                No basic concentration or data-quality flags are active.
               </p>
             ) : (
               <ul className="space-y-2 text-sm">
