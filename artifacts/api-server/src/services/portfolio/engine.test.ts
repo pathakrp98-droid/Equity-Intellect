@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculatePortfolio } from "./engine";
+import { calculatePortfolio, visiblePortfolioRiskFlags } from "./engine";
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+test("hides legacy cash warnings from user-facing risk flags", () => {
+  assert.deepEqual(
+    visiblePortfolioRiskFlags([
+      "Cash buffer is below 5% of total portfolio value.",
+      "ETF is 53.5% of invested assets.",
+    ]),
+    ["ETF is 53.5% of invested assets."],
+  );
+});
 
 test("calculates average cost, cash and unrealized P&L from the ledger", () => {
   const result = calculatePortfolio(

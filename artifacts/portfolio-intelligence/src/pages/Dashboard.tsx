@@ -60,6 +60,10 @@ function priorityClass(priority: "high" | "medium" | "low") {
       : "border-blue-500/30 bg-blue-500/5 text-blue-500";
 }
 
+function isVisibleRiskText(value: string): boolean {
+  return !/\bcash(?:\s+buffer)?\b/i.test(value);
+}
+
 export function Dashboard() {
   const [, navigate] = useLocation();
   const briefQuery = useLatestMorningBrief();
@@ -68,6 +72,12 @@ export function Dashboard() {
   const refreshMarket = useRefreshMarketIntelligence();
   const systemQuery = useIntegrationHealth();
   const brief = briefQuery.data;
+  const visibleGuardianRisks =
+    brief?.portfolioPulse.guardian?.topRisks.filter(isVisibleRiskText) ?? [];
+  const visibleBriefRisks =
+    brief?.risks.filter((risk) =>
+      isVisibleRiskText(`${risk.title} ${risk.detail}`),
+    ) ?? [];
   const busy = generateBrief.isPending || refreshMarket.isPending;
 
   const refreshAndGenerate = async () => {
@@ -351,21 +361,19 @@ export function Dashboard() {
                       </div>
                       <ArrowRight className="h-4 w-4 text-primary" />
                     </button>
-                    {brief.portfolioPulse.guardian.topRisks.length === 0 ? (
+                    {visibleGuardianRisks.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
                         No Guardian warnings need attention.
                       </p>
                     ) : (
-                      brief.portfolioPulse.guardian.topRisks
-                        .slice(0, 4)
-                        .map((risk) => (
-                          <p
-                            key={risk}
-                            className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs text-amber-200"
-                          >
-                            {risk}
-                          </p>
-                        ))
+                      visibleGuardianRisks.slice(0, 4).map((risk) => (
+                        <p
+                          key={risk}
+                          className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs text-amber-200"
+                        >
+                          {risk}
+                        </p>
+                      ))
                     )}
                   </>
                 ) : (
@@ -411,10 +419,10 @@ export function Dashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {brief.risks.length === 0 ? (
+                {visibleBriefRisks.length === 0 ? (
                   <EmptyLine text="No material risks were surfaced." />
                 ) : (
-                  brief.risks
+                  visibleBriefRisks
                     .slice(0, 6)
                     .map((risk) => <RiskRow key={risk.id} risk={risk} />)
                 )}
