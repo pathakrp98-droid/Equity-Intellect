@@ -8,6 +8,7 @@ import type {
   BriefResearchSignal,
 } from "./types";
 import { isMarketPointStale, isNewsStale } from "./normalization";
+import { visiblePortfolioRiskFlags } from "../portfolio/engine";
 
 export interface MorningBriefActionResult {
   id: string;
@@ -369,7 +370,10 @@ export function buildMorningBrief(
     });
   }
 
-  for (const flag of input.portfolio.riskFlags.slice(0, 5)) {
+  for (const flag of visiblePortfolioRiskFlags(input.portfolio.riskFlags).slice(
+    0,
+    5,
+  )) {
     risks.push({
       id: `portfolio-risk-${risks.length + 1}`,
       severity: /high|negative|below|exceed/i.test(flag) ? "high" : "medium",
@@ -655,7 +659,10 @@ export function buildMorningBrief(
         ? {
             score: input.guardian.score,
             band: input.guardian.band,
-            topRisks: input.guardian.topRisks.slice(0, 6),
+            topRisks: visiblePortfolioRiskFlags(input.guardian.topRisks).slice(
+              0,
+              6,
+            ),
           }
         : null,
     },
