@@ -338,13 +338,19 @@ export function makeSystemDedupeKey(
 
 export function evaluateSystemPortfolioAlerts(input: {
   holdings: HoldingForSystemAlert[];
+  sectorAllocations?: Array<{ sector: string; allocationPct: number }>;
   theses: ThesisForAlert[];
   now: Date;
   largeMovePct?: number;
   concentrationPct?: number;
+  sectorConcentrationPct?: number;
 }): AlertCandidate[] {
   const largeMovePct = Math.max(0.1, input.largeMovePct ?? 5);
   const concentrationPct = Math.max(1, input.concentrationPct ?? 25);
+  const sectorConcentrationPct = Math.max(
+    1,
+    input.sectorConcentrationPct ?? 35,
+  );
   const thesesByTicker = new Map(
     input.theses.map((thesis) => [thesis.ticker.toUpperCase(), thesis]),
   );
@@ -433,6 +439,35 @@ export function evaluateSystemPortfolioAlerts(input: {
         },
       });
     }
+  }
+
+  for (const sector of input.sectorAllocations ?? []) {
+    if (sector.allocationPct <= sectorConcentrationPct) continue;
+    const sectorKey = sector.sector.trim().toUpperCase() || "UNCLASSIFIED";
+    candidates.push({
+      ruleId: null,
+      ticker: null,
+      alertType: "price_above",
+      severity:
+        sector.allocationPct >= sectorConcentrationPct + 10 ? "high" : "medium",
+      title: `${sector.sector} sector concentration exceeds ${sectorConcentrationPct}%`,
+      detail: `${sector.sector} represents ${sector.allocationPct.toFixed(1)}% of portfolio value. Review sector exposure in Guardian Mode.`,
+      source: "Guardian Mode",
+      sourceUrl: null,
+      dedupeKey: makeSystemDedupeKey(
+        "price_above",
+        `sector-${sectorKey}`,
+        `concentration-${date}`,
+      ),
+      triggeredAt: input.now,
+      metadata: {
+        category: "concentration",
+        concentrationKind: "sector",
+        sector: sector.sector,
+        allocationPct: sector.allocationPct,
+        threshold: sectorConcentrationPct,
+      },
+    });
   }
 
   return candidates;

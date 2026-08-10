@@ -606,10 +606,18 @@ class AlertService {
             priceSource: holding.priceSource,
             priceAsOf: holding.priceAsOf ? new Date(holding.priceAsOf) : null,
           })),
+          sectorAllocations: (overview.snapshot.sectorAllocation ?? []).map(
+            (sector) => ({
+              sector: sector.sector,
+              allocationPct: sector.allocationPct,
+            }),
+          ),
           theses,
           now,
           concentrationPct:
             guardianSettings.settings.portfolioLimits.maxStockConcentrationPct,
+          sectorConcentrationPct:
+            guardianSettings.settings.portfolioLimits.maxSectorConcentrationPct,
         }),
       );
     }
