@@ -219,3 +219,29 @@ test("excludes missing prices from the mover ranking", () => {
     ["TCS"],
   );
 });
+
+test("excludes legacy cash warnings from generated brief risks", () => {
+  const input = baseInput();
+  input.portfolio.riskFlags = [
+    "Cash buffer is below 5% of total portfolio value.",
+    "ETF is 53.5% of invested assets.",
+  ];
+  input.guardian = {
+    score: 68,
+    band: "caution",
+    topRisks: [
+      "Cash buffer is below the configured limit.",
+      "Largest sector exceeds the configured limit.",
+    ],
+  };
+
+  const result = buildMorningBrief(input);
+
+  assert.equal(
+    result.risks.some((risk) => /cash/i.test(risk.detail)),
+    false,
+  );
+  assert.deepEqual(result.portfolioPulse.guardian?.topRisks, [
+    "Largest sector exceeds the configured limit.",
+  ]);
+});
