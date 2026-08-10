@@ -116,6 +116,12 @@ test("system monitoring detects research targets, large moves and concentration"
         priceAsOf: now,
       },
     ],
+    sectorAllocations: [
+      {
+        sector: "Energy",
+        allocationPct: 42,
+      },
+    ],
     theses: [
       {
         ticker: "RELIANCE",
@@ -126,12 +132,20 @@ test("system monitoring detects research targets, large moves and concentration"
       },
     ],
     concentrationPct: 25,
+    sectorConcentrationPct: 35,
   });
   assert.deepEqual(
     candidates.map((candidate) => candidate.metadata.category).sort(),
-    ["concentration", "large_move", "target_price"],
+    ["concentration", "concentration", "large_move", "target_price"],
   );
-  assert.ok(candidates.every((candidate) => candidate.ticker === "RELIANCE"));
+  assert.ok(
+    candidates.some(
+      (candidate) =>
+        candidate.metadata.category === "concentration" &&
+        candidate.metadata.concentrationKind === "sector" &&
+        candidate.metadata.sector === "Energy",
+    ),
+  );
 });
 
 test("system monitoring stays quiet below automatic thresholds", () => {
