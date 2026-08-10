@@ -36,6 +36,7 @@ function baseInput(): BuildMorningBriefInput {
         unrealizedPnl: 5000,
         unrealizedPnlPct: 11.11,
         priceSource: "provider",
+        priceStatus: "fresh",
       },
       {
         ticker: "TCS",
@@ -51,6 +52,7 @@ function baseInput(): BuildMorningBriefInput {
         unrealizedPnl: 5000,
         unrealizedPnlPct: 11.11,
         priceSource: "provider",
+        priceStatus: "fresh",
       },
     ],
     researchSignals: [
@@ -124,6 +126,12 @@ test("builds a portfolio-aware brief with day P&L", () => {
   assert.equal(result.portfolioPulse.dailyPnl, 500);
   assert.equal(result.marketPulse.tone, "positive");
   assert.match(result.headline, /Portfolio up/);
+  assert.deepEqual(
+    result.portfolioPulse.movers.map((move) => move.ticker),
+    ["RELIANCE", "TCS"],
+  );
+  assert.equal(result.portfolioPulse.movers[0]?.dayPnl, 1000);
+  assert.equal(result.portfolioPulse.movers[0]?.contributionPct, 0.91);
 });
 
 test("prioritizes concentration, negative news and weakening theses", () => {
@@ -144,7 +152,9 @@ test("labels missing provider and market data instead of inventing context", () 
   const result = buildMorningBrief(input);
   assert.equal(result.marketPulse.tone, "unknown");
   assert.match(result.marketPulse.summary, /unknown/);
-  assert.ok(result.dataQuality.warnings.includes("No external provider is configured."));
+  assert.ok(
+    result.dataQuality.warnings.includes("No external provider is configured."),
+  );
   assert.ok(
     result.priorityActions.some(
       (action) => action.id === "connect-market-provider",
@@ -160,5 +170,52 @@ test("flags stale data and includes high-impact upcoming events", () => {
   assert.equal(result.upcomingEvents[0]?.title, "Quarterly results");
   assert.ok(
     result.priorityActions.some((action) => action.id === "prepare-event-1"),
+  );
+});
+
+test("snapshots material company news and Guardian warnings", () => {
+  const input = baseInput();
+  input.guardian = {
+    score: 68,
+    band: "caution",
+    topRisks: ["Largest position exceeds the configured stock limit."],
+  };
+  const result = buildMorningBrief(input);
+  assert.equal(
+    result.marketPulse.materialNews[0]?.headline,
+    "Margin guidance reduced",
+  );
+  assert.equal(result.marketPulse.materialNews[0]?.source, "Company filing");
+  assert.equal(result.portfolioPulse.guardian?.score, 68);
+  assert.equal(result.portfolioPulse.guardian?.topRisks.length, 1);
+});
+
+test("compares the current brief with the prior dated brief", () => {
+  const input = baseInput();
+  input.previousBrief = {
+    briefDate: "2026-07-18",
+    portfolioPulse: {
+      totalValue: 108000,
+      dailyPnl: -250,
+      largestPositionPct: 42,
+    },
+    priorityActions: [{ priority: "high" }, { priority: "medium" }],
+  };
+  const result = buildMorningBrief(input);
+  const comparison = result.portfolioPulse.changeSincePrevious;
+  assert.equal(comparison.previousBriefDate, "2026-07-18");
+  assert.equal(comparison.portfolioValueChange, 2000);
+  assert.equal(comparison.dailyPnlChange, 750);
+  assert.equal(comparison.largestPositionPctChange, 3);
+  assert.match(comparison.summary, /increased/);
+});
+
+test("excludes missing prices from the mover ranking", () => {
+  const input = baseInput();
+  input.holdings[0]!.priceStatus = "missing";
+  const result = buildMorningBrief(input);
+  assert.deepEqual(
+    result.portfolioPulse.movers.map((move) => move.ticker),
+    ["TCS"],
   );
 });

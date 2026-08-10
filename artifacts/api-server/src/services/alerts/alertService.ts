@@ -16,8 +16,10 @@ import {
 import { and, desc, eq, gte } from "drizzle-orm";
 
 import { portfolioService } from "../portfolio/portfolioService";
+import { guardianService } from "../guardian/guardianService";
 import {
   evaluateRule,
+  evaluateSystemPortfolioAlerts,
   makeSystemDedupeKey,
   meetsSeverityThreshold,
   type AlertCandidate,
@@ -89,7 +91,8 @@ function cleanText(
 ): string | null {
   const text = value?.trim();
   if (!text) return null;
-  if (text.length > maximum) throw new Error(`Text cannot exceed ${maximum} characters`);
+  if (text.length > maximum)
+    throw new Error(`Text cannot exceed ${maximum} characters`);
   return text;
 }
 
@@ -101,7 +104,9 @@ function positiveInteger(value: number | undefined, fallback: number): number {
   return Math.round(value);
 }
 
-function validateTime(value: string | null | undefined): string | null | undefined {
+function validateTime(
+  value: string | null | undefined,
+): string | null | undefined {
   if (value === undefined || value === null) return value;
   const normalized = value.trim();
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) {
@@ -111,7 +116,8 @@ function validateTime(value: string | null | undefined): string | null | undefin
 }
 
 function validateRule(input: CreateAlertRuleInput) {
-  if (!alertTypes.has(input.ruleType)) throw new Error("Unsupported alert rule type");
+  if (!alertTypes.has(input.ruleType))
+    throw new Error("Unsupported alert rule type");
   const name = cleanText(input.name, 220);
   if (!name) throw new Error("Rule name is required");
   const ticker = normalizeTicker(input.ticker);
@@ -123,10 +129,14 @@ function validateRule(input: CreateAlertRuleInput) {
     "day_change_above",
     "day_change_below",
   ].includes(input.ruleType);
-  if (priceRule && (input.threshold === undefined || input.threshold === null)) {
+  if (
+    priceRule &&
+    (input.threshold === undefined || input.threshold === null)
+  ) {
     throw new Error("A numeric threshold is required for price rules");
   }
-  if (priceRule && !ticker) throw new Error("ticker is required for price rules");
+  if (priceRule && !ticker)
+    throw new Error("ticker is required for price rules");
   if (input.ruleType === "news_keyword" && !cleanText(input.textValue, 300)) {
     throw new Error("A keyword is required for news keyword rules");
   }
@@ -230,7 +240,11 @@ class AlertService {
     return created;
   }
 
-  async updateRule(userId: string, id: number, input: Partial<CreateAlertRuleInput>) {
+  async updateRule(
+    userId: string,
+    id: number,
+    input: Partial<CreateAlertRuleInput>,
+  ) {
     const [existing] = await db
       .select()
       .from(alertRulesTable)
@@ -244,8 +258,10 @@ class AlertService {
       ticker: input.ticker === undefined ? existing.ticker : input.ticker,
       ruleType: input.ruleType ?? existing.ruleType,
       severity: input.severity ?? existing.severity,
-      threshold: input.threshold === undefined ? existing.threshold : input.threshold,
-      textValue: input.textValue === undefined ? existing.textValue : input.textValue,
+      threshold:
+        input.threshold === undefined ? existing.threshold : input.threshold,
+      textValue:
+        input.textValue === undefined ? existing.textValue : input.textValue,
       lookaheadDays:
         input.lookaheadDays === undefined
           ? existing.lookaheadDays
@@ -296,7 +312,9 @@ class AlertService {
         case "active":
           return !row.dismissedAt && !row.resolvedAt;
         case "acknowledged":
-          return Boolean(row.acknowledgedAt) && !row.dismissedAt && !row.resolvedAt;
+          return (
+            Boolean(row.acknowledgedAt) && !row.dismissedAt && !row.resolvedAt
+          );
         case "dismissed":
           return Boolean(row.dismissedAt);
         case "resolved":
@@ -312,7 +330,9 @@ class AlertService {
       this.listAlerts(userId, { status: "all", limit: 500 }),
       this.listRules(userId),
     ]);
-    const active = alerts.filter((alert) => !alert.dismissedAt && !alert.resolvedAt);
+    const active = alerts.filter(
+      (alert) => !alert.dismissedAt && !alert.resolvedAt,
+    );
     return {
       active: active.length,
       critical: active.filter((alert) => alert.severity === "critical").length,
@@ -390,71 +410,82 @@ class AlertService {
 
   async evaluate(userId: string) {
     const now = new Date();
-    const [preferences, overview, rules, livePreferences] = await Promise.all([
-      this.getPreferences(userId),
-      portfolioService.getOverview(userId),
-      this.listRules(userId),
-      db
-        .select()
-        .from(liveDataPreferencesTable)
-        .where(eq(liveDataPreferencesTable.userId, userId))
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
-    ]);
+    const [preferences, overview, rules, livePreferences, guardianSettings] =
+      await Promise.all([
+        this.getPreferences(userId),
+        portfolioService.getOverview(userId),
+        this.listRules(userId),
+        db
+          .select()
+          .from(liveDataPreferencesTable)
+          .where(eq(liveDataPreferencesTable.userId, userId))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
+        guardianService.getSettings(userId),
+      ]);
     const portfolioTickers = new Set(
       overview.holdings.map((holding) => holding.ticker.toUpperCase()),
     );
     const recentNewsSince = new Date(now.getTime() - 7 * 86_400_000);
-    const [quoteRows, newsRows, eventRows, companyTheses, invalidations, providerRuns] =
-      await Promise.all([
-        db
-          .select()
-          .from(marketDataPointsTable)
-          .where(eq(marketDataPointsTable.userId, userId)),
-        db
-          .select()
-          .from(marketNewsTable)
-          .where(
-            and(
-              eq(marketNewsTable.userId, userId),
-              gte(marketNewsTable.publishedAt, recentNewsSince),
-            ),
+    const [
+      quoteRows,
+      newsRows,
+      eventRows,
+      companyTheses,
+      invalidations,
+      providerRuns,
+    ] = await Promise.all([
+      db
+        .select()
+        .from(marketDataPointsTable)
+        .where(eq(marketDataPointsTable.userId, userId)),
+      db
+        .select()
+        .from(marketNewsTable)
+        .where(
+          and(
+            eq(marketNewsTable.userId, userId),
+            gte(marketNewsTable.publishedAt, recentNewsSince),
           ),
-        db
-          .select()
-          .from(marketEventsTable)
-          .where(eq(marketEventsTable.userId, userId)),
-        db
-          .select({ company: researchCompaniesTable, thesis: investmentThesesTable })
-          .from(researchCompaniesTable)
-          .leftJoin(
-            investmentThesesTable,
-            eq(investmentThesesTable.companyId, researchCompaniesTable.id),
-          )
-          .where(eq(researchCompaniesTable.userId, userId)),
-        db
-          .select({
-            trigger: researchInvalidationTriggersTable,
-            company: researchCompaniesTable,
-          })
-          .from(researchInvalidationTriggersTable)
-          .innerJoin(
-            researchCompaniesTable,
-            eq(
-              researchCompaniesTable.id,
-              researchInvalidationTriggersTable.companyId,
-            ),
-          )
-          .where(eq(researchInvalidationTriggersTable.userId, userId)),
-        db
-          .select()
-          .from(marketProviderRunsTable)
-          .where(eq(marketProviderRunsTable.userId, userId))
-          .orderBy(desc(marketProviderRunsTable.startedAt))
-          .limit(50),
-      ]);
+        ),
+      db
+        .select()
+        .from(marketEventsTable)
+        .where(eq(marketEventsTable.userId, userId)),
+      db
+        .select({
+          company: researchCompaniesTable,
+          thesis: investmentThesesTable,
+        })
+        .from(researchCompaniesTable)
+        .leftJoin(
+          investmentThesesTable,
+          eq(investmentThesesTable.companyId, researchCompaniesTable.id),
+        )
+        .where(eq(researchCompaniesTable.userId, userId)),
+      db
+        .select({
+          trigger: researchInvalidationTriggersTable,
+          company: researchCompaniesTable,
+        })
+        .from(researchInvalidationTriggersTable)
+        .innerJoin(
+          researchCompaniesTable,
+          eq(
+            researchCompaniesTable.id,
+            researchInvalidationTriggersTable.companyId,
+          ),
+        )
+        .where(eq(researchInvalidationTriggersTable.userId, userId)),
+      db
+        .select()
+        .from(marketProviderRunsTable)
+        .where(eq(marketProviderRunsTable.userId, userId))
+        .orderBy(desc(marketProviderRunsTable.startedAt))
+        .limit(50),
+    ]);
 
-    const quotes = quoteRows
+    const providerQuotes = quoteRows
       .filter((row) => row.kind === "equity")
       .map((row) => ({
         ticker: row.symbol.toUpperCase(),
@@ -468,6 +499,25 @@ class AlertService {
         source: row.source,
         sourceUrl: row.sourceUrl,
       }));
+    const quotesByTicker = new Map(
+      providerQuotes.map((quote) => [quote.ticker, quote]),
+    );
+    for (const holding of overview.holdings) {
+      const ticker = holding.ticker.toUpperCase();
+      const providerQuote = quotesByTicker.get(ticker);
+      quotesByTicker.set(ticker, {
+        ticker,
+        price: holding.marketPrice,
+        changePct: holding.dayChangePct,
+        previousClose: holding.previousClose,
+        asOf: holding.priceAsOf
+          ? new Date(holding.priceAsOf)
+          : (providerQuote?.asOf ?? now),
+        source: holding.priceSource,
+        sourceUrl: providerQuote?.sourceUrl ?? null,
+      });
+    }
+    const quotes = [...quotesByTicker.values()];
     const news = newsRows.map((row) => ({
       id: row.id,
       ticker: row.ticker?.toUpperCase() ?? null,
@@ -496,6 +546,7 @@ class AlertService {
         name: row.company.name,
         status: row.thesis!.status,
         nextReviewAt: row.thesis!.nextReviewAt,
+        targetPrice: row.thesis!.targetPrice ?? row.thesis!.basePrice,
       }));
 
     const candidates: AlertCandidate[] = [];
@@ -513,7 +564,8 @@ class AlertService {
       ) {
         continue;
       }
-      if (rule.ruleType === "news_keyword" && !preferences.enableNewsAlerts) continue;
+      if (rule.ruleType === "news_keyword" && !preferences.enableNewsAlerts)
+        continue;
       if (
         ["earnings_upcoming", "corporate_action_upcoming"].includes(
           rule.ruleType,
@@ -542,6 +594,26 @@ class AlertService {
       );
     }
 
+    if (preferences.enablePriceAlerts) {
+      candidates.push(
+        ...evaluateSystemPortfolioAlerts({
+          holdings: overview.holdings.map((holding) => ({
+            ticker: holding.ticker,
+            name: holding.name,
+            marketPrice: holding.marketPrice,
+            dayChangePct: holding.dayChangePct,
+            allocationPct: holding.allocationPct,
+            priceSource: holding.priceSource,
+            priceAsOf: holding.priceAsOf ? new Date(holding.priceAsOf) : null,
+          })),
+          theses,
+          now,
+          concentrationPct:
+            guardianSettings.settings.portfolioLimits.maxStockConcentrationPct,
+        }),
+      );
+    }
+
     if (preferences.enableThesisAlerts) {
       for (const thesis of theses) {
         if (!portfolioTickers.has(thesis.ticker)) continue;
@@ -564,14 +636,18 @@ class AlertService {
             metadata: { thesisStatus: thesis.status },
           });
         }
-        if (thesis.nextReviewAt && thesis.nextReviewAt.getTime() <= now.getTime()) {
+        if (
+          thesis.nextReviewAt &&
+          thesis.nextReviewAt.getTime() <= now.getTime() + 7 * 86_400_000
+        ) {
+          const overdue = thesis.nextReviewAt.getTime() <= now.getTime();
           candidates.push({
             ruleId: null,
             ticker: thesis.ticker,
             alertType: "thesis_review_due",
-            severity: "medium",
-            title: `${thesis.ticker} research review is overdue`,
-            detail: `The scheduled thesis review date was ${thesis.nextReviewAt.toLocaleDateString("en-IN")}.`,
+            severity: overdue ? "medium" : "low",
+            title: `${thesis.ticker} research review is ${overdue ? "overdue" : "coming up"}`,
+            detail: `The scheduled thesis review date is ${thesis.nextReviewAt.toLocaleDateString("en-IN")}.`,
             source: "Research Engine",
             sourceUrl: null,
             dedupeKey: makeSystemDedupeKey(
@@ -586,7 +662,8 @@ class AlertService {
       }
       for (const row of invalidations) {
         const ticker = row.company.ticker.toUpperCase();
-        if (preferences.portfolioOnly && !portfolioTickers.has(ticker)) continue;
+        if (preferences.portfolioOnly && !portfolioTickers.has(ticker))
+          continue;
         if (row.trigger.status !== "triggered") continue;
         candidates.push({
           ruleId: null,
@@ -614,10 +691,15 @@ class AlertService {
 
     if (preferences.enableNewsAlerts) {
       for (const item of news) {
-        if (preferences.portfolioOnly && item.ticker && !portfolioTickers.has(item.ticker)) {
+        if (
+          preferences.portfolioOnly &&
+          item.ticker &&
+          !portfolioTickers.has(item.ticker)
+        ) {
           continue;
         }
-        if (item.sentiment !== "negative" || item.relevanceScore < 0.65) continue;
+        if (item.sentiment !== "negative" || item.relevanceScore < 0.65)
+          continue;
         candidates.push({
           ruleId: null,
           ticker: item.ticker,
@@ -645,10 +727,17 @@ class AlertService {
     if (preferences.enableCalendarAlerts) {
       const until = now.getTime() + 7 * 86_400_000;
       for (const event of events) {
-        if (preferences.portfolioOnly && event.ticker && !portfolioTickers.has(event.ticker)) {
+        if (
+          preferences.portfolioOnly &&
+          event.ticker &&
+          !portfolioTickers.has(event.ticker)
+        ) {
           continue;
         }
-        if (event.eventAt.getTime() < now.getTime() || event.eventAt.getTime() > until) {
+        if (
+          event.eventAt.getTime() < now.getTime() ||
+          event.eventAt.getTime() > until
+        ) {
           continue;
         }
         const type =
@@ -662,14 +751,21 @@ class AlertService {
           ruleId: null,
           ticker: event.ticker,
           alertType: type,
-          severity: event.eventAt.getTime() - now.getTime() <= 2 * 86_400_000 ? "high" : "medium",
+          severity:
+            event.eventAt.getTime() - now.getTime() <= 2 * 86_400_000
+              ? "high"
+              : "medium",
           title: event.title,
           detail:
             event.description ||
             `Scheduled for ${event.eventAt.toLocaleDateString("en-IN")}.`,
           source: event.source,
           sourceUrl: event.sourceUrl ?? null,
-          dedupeKey: makeSystemDedupeKey(type, event.ticker ?? "market", String(event.id)),
+          dedupeKey: makeSystemDedupeKey(
+            type,
+            event.ticker ?? "market",
+            String(event.id),
+          ),
           triggeredAt: now,
           metadata: {
             eventAt: event.eventAt.toISOString(),
@@ -685,7 +781,9 @@ class AlertService {
         (livePreferences?.quoteTtlMinutes ?? 15) +
           (livePreferences?.staleIfErrorMinutes ?? 1_440),
       );
-      const quoteByTicker = new Map(quotes.map((quote) => [quote.ticker, quote]));
+      const quoteByTicker = new Map(
+        quotes.map((quote) => [quote.ticker, quote]),
+      );
       for (const holding of overview.holdings) {
         const ticker = holding.ticker.toUpperCase();
         const quote = quoteByTicker.get(ticker);
@@ -700,8 +798,8 @@ class AlertService {
           severity: quote ? "medium" : "high",
           title: `${ticker} market price is ${quote ? "stale" : "missing"}`,
           detail: quote
-            ? `Latest provider quote is ${Math.round(ageMinutes)} minutes old. Portfolio valuation may be stale.`
-            : "No provider quote is available. Portfolio valuation is using a transaction-price fallback.",
+            ? `Latest ${holding.priceSource.replaceAll("_", " ")} price is ${Math.round(ageMinutes)} minutes old. Portfolio valuation may be stale.`
+            : "No market price is available. Add a manual price or review the live-data mapping.",
           source: "Live Data Monitor",
           sourceUrl: null,
           dedupeKey: makeSystemDedupeKey(
@@ -721,11 +819,13 @@ class AlertService {
     if (preferences.enableProviderFailureAlerts) {
       const latestByProvider = new Map<string, (typeof providerRuns)[number]>();
       for (const run of providerRuns) {
-        if (!latestByProvider.has(run.provider)) latestByProvider.set(run.provider, run);
+        if (!latestByProvider.has(run.provider))
+          latestByProvider.set(run.provider, run);
       }
       for (const run of latestByProvider.values()) {
         if (run.status !== "failed") continue;
-        if (now.getTime() - run.startedAt.getTime() > 24 * 60 * 60_000) continue;
+        if (now.getTime() - run.startedAt.getTime() > 24 * 60 * 60_000)
+          continue;
         candidates.push({
           ruleId: null,
           ticker: null,
@@ -748,7 +848,12 @@ class AlertService {
 
     const accepted = candidates.filter((candidate) => {
       if (!preferences.inAppNotifications) return false;
-      if (!meetsSeverityThreshold(candidate.severity, preferences.severityThreshold)) {
+      if (
+        !meetsSeverityThreshold(
+          candidate.severity,
+          preferences.severityThreshold,
+        )
+      ) {
         return false;
       }
       return !(
@@ -758,7 +863,8 @@ class AlertService {
       );
     });
 
-    for (const candidate of accepted) await this.upsertCandidate(userId, candidate);
+    for (const candidate of accepted)
+      await this.upsertCandidate(userId, candidate);
 
     const triggeredRuleIds = new Set(
       accepted

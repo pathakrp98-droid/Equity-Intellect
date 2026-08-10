@@ -65,6 +65,17 @@ export interface ThesisForAlert {
   name: string;
   status: string;
   nextReviewAt: Date | null;
+  targetPrice?: number | null;
+}
+
+export interface HoldingForSystemAlert {
+  ticker: string;
+  name: string;
+  marketPrice: number;
+  dayChangePct: number;
+  allocationPct: number;
+  priceSource: string;
+  priceAsOf: Date | null;
 }
 
 export interface AlertCandidate {
@@ -148,14 +159,17 @@ export function evaluateRule(
     case "price_below":
     case "day_change_above":
     case "day_change_below": {
-      if (rule.threshold === null || !Number.isFinite(rule.threshold)) return [];
+      if (rule.threshold === null || !Number.isFinite(rule.threshold))
+        return [];
       return quotes.flatMap((quote) => {
         const value = rule.ruleType.startsWith("day_change")
           ? quote.changePct
           : quote.price;
         if (value === null || !Number.isFinite(value)) return [];
         const isAbove = rule.ruleType.endsWith("above");
-        const triggered = isAbove ? value >= rule.threshold! : value <= rule.threshold!;
+        const triggered = isAbove
+          ? value >= rule.threshold!
+          : value <= rule.threshold!;
         if (!triggered) return [];
         const metricLabel = rule.ruleType.startsWith("day_change")
           ? "daily change"
@@ -217,7 +231,8 @@ export function evaluateRule(
       const lookaheadDays = Math.max(0, rule.lookaheadDays ?? 0);
       const until = context.now.getTime() + lookaheadDays * 86_400_000;
       return theses.flatMap((thesis) => {
-        if (!thesis.nextReviewAt || thesis.nextReviewAt.getTime() > until) return [];
+        if (!thesis.nextReviewAt || thesis.nextReviewAt.getTime() > until)
+          return [];
         return [
           {
             ruleId: rule.id,
@@ -237,7 +252,9 @@ export function evaluateRule(
     }
 
     case "news_keyword": {
-      const keyword = (rule.textValue ?? String(rule.config?.keyword ?? "")).trim();
+      const keyword = (
+        rule.textValue ?? String(rule.config?.keyword ?? "")
+      ).trim();
       if (!keyword) return [];
       return news.flatMap((item) => {
         const body = `${item.headline} ${item.summary ?? ""}`;
@@ -317,4 +334,106 @@ export function makeSystemDedupeKey(
   occurrence: string,
 ): string {
   return `system:${type}:${entity}:${occurrence}`;
+}
+
+export function evaluateSystemPortfolioAlerts(input: {
+  holdings: HoldingForSystemAlert[];
+  theses: ThesisForAlert[];
+  now: Date;
+  largeMovePct?: number;
+  concentrationPct?: number;
+}): AlertCandidate[] {
+  const largeMovePct = Math.max(0.1, input.largeMovePct ?? 5);
+  const concentrationPct = Math.max(1, input.concentrationPct ?? 25);
+  const thesesByTicker = new Map(
+    input.theses.map((thesis) => [thesis.ticker.toUpperCase(), thesis]),
+  );
+  const date = dayBucket(input.now);
+  const candidates: AlertCandidate[] = [];
+
+  for (const holding of input.holdings) {
+    const ticker = holding.ticker.toUpperCase();
+    const thesis = thesesByTicker.get(ticker);
+    const targetPrice = thesis?.targetPrice;
+    if (
+      typeof targetPrice === "number" &&
+      targetPrice > 0 &&
+      holding.marketPrice >= targetPrice
+    ) {
+      candidates.push({
+        ruleId: null,
+        ticker,
+        alertType: "price_above",
+        severity: "high",
+        title: `${ticker} reached its research target`,
+        detail: `${ticker} is at ₹${holding.marketPrice.toLocaleString("en-IN", { maximumFractionDigits: 2 })}, at or above the saved research target of ₹${targetPrice.toLocaleString("en-IN", { maximumFractionDigits: 2 })}. Review the thesis and valuation before acting.`,
+        source: "Research Engine",
+        sourceUrl: null,
+        dedupeKey: makeSystemDedupeKey(
+          "price_above",
+          ticker,
+          `research-target-${targetPrice}`,
+        ),
+        triggeredAt: input.now,
+        metadata: {
+          category: "target_price",
+          observedValue: holding.marketPrice,
+          targetPrice,
+        },
+      });
+    }
+
+    if (Math.abs(holding.dayChangePct) >= largeMovePct) {
+      const positive = holding.dayChangePct > 0;
+      const alertType = positive
+        ? ("day_change_above" as const)
+        : ("day_change_below" as const);
+      candidates.push({
+        ruleId: null,
+        ticker,
+        alertType,
+        severity: Math.abs(holding.dayChangePct) >= 8 ? "high" : "medium",
+        title: `${ticker} moved ${Math.abs(holding.dayChangePct).toFixed(2)}% today`,
+        detail: `${holding.name} has a ${positive ? "positive" : "negative"} daily move above the ${largeMovePct.toFixed(1)}% monitoring threshold.`,
+        source: "Portfolio Engine",
+        sourceUrl: null,
+        dedupeKey: makeSystemDedupeKey(alertType, ticker, date),
+        triggeredAt: input.now,
+        metadata: {
+          category: "large_move",
+          dayChangePct: holding.dayChangePct,
+          threshold: largeMovePct,
+          priceSource: holding.priceSource,
+          priceAsOf: holding.priceAsOf?.toISOString() ?? null,
+        },
+      });
+    }
+
+    if (holding.allocationPct > concentrationPct) {
+      candidates.push({
+        ruleId: null,
+        ticker,
+        alertType: "price_above",
+        severity:
+          holding.allocationPct >= concentrationPct + 10 ? "high" : "medium",
+        title: `${ticker} concentration exceeds ${concentrationPct}%`,
+        detail: `${ticker} represents ${holding.allocationPct.toFixed(1)}% of portfolio value. Review position sizing in Guardian Mode.`,
+        source: "Guardian Mode",
+        sourceUrl: null,
+        dedupeKey: makeSystemDedupeKey(
+          "price_above",
+          ticker,
+          `concentration-${date}`,
+        ),
+        triggeredAt: input.now,
+        metadata: {
+          category: "concentration",
+          allocationPct: holding.allocationPct,
+          threshold: concentrationPct,
+        },
+      });
+    }
+  }
+
+  return candidates;
 }

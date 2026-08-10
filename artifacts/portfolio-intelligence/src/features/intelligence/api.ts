@@ -12,11 +12,7 @@ export type MarketDataKind =
 
 export type MarketImpact = "critical" | "high" | "medium" | "low";
 export type MarketSentiment =
-  | "positive"
-  | "negative"
-  | "neutral"
-  | "mixed"
-  | "unknown";
+  "positive" | "negative" | "neutral" | "mixed" | "unknown";
 
 export interface MarketDataPoint {
   id: number;
@@ -107,6 +103,17 @@ export interface MorningBrief {
       asOf: string;
       source: string;
     }>;
+    materialNews?: Array<{
+      id: number;
+      ticker: string | null;
+      headline: string;
+      summary: string | null;
+      sentiment: string;
+      relevanceScore: number;
+      publishedAt: string;
+      source: string;
+      sourceUrl: string | null;
+    }>;
   };
   portfolioPulse: {
     totalValue: number;
@@ -119,6 +126,30 @@ export interface MorningBrief {
     largestPositionPct: number;
     holdingsCount: number;
     concentrationRisk: string;
+    movers?: Array<{
+      ticker: string;
+      name: string;
+      marketPrice: number;
+      dayChangePct: number;
+      dayPnl: number;
+      contributionPct: number;
+      direction: "gainer" | "loser" | "flat";
+      priceSource: string;
+      priceStatus: "fresh" | "stale" | "missing";
+    }>;
+    changeSincePrevious?: {
+      previousBriefDate: string | null;
+      portfolioValueChange: number | null;
+      dailyPnlChange: number | null;
+      largestPositionPctChange: number | null;
+      highPriorityActionChange: number | null;
+      summary: string;
+    };
+    guardian?: {
+      score: number;
+      band: string;
+      topRisks: string[];
+    } | null;
   };
   priorityActions: MorningBriefAction[];
   upcomingEvents: Array<{
@@ -239,7 +270,9 @@ export function useMorningBriefHistory(limit = 30) {
   return useQuery({
     queryKey: [...intelligenceKey, "brief", "history", limit],
     queryFn: () =>
-      apiRequest<MorningBrief[]>(`/api/intelligence/brief/history?limit=${limit}`),
+      apiRequest<MorningBrief[]>(
+        `/api/intelligence/brief/history?limit=${limit}`,
+      ),
   });
 }
 
