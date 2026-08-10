@@ -47,6 +47,16 @@ test("fully configured installation is ready", () => {
   assert.equal(result.blockers.length, 0);
 });
 
+test("holdings-first portfolio is ready without transactions", () => {
+  const result = evaluateIntegrationReadiness(facts({
+    portfolio: { portfolios: 1, holdings: 5, transactions: 0, holdingsWithPrices: 5, stalePrices: 0 },
+  }));
+  const portfolio = result.modules.find((item) => item.key === "portfolio");
+  assert.equal(portfolio?.status, "ready");
+  assert.equal(portfolio?.score, 20);
+  assert.ok(!result.recommendations.some((item) => /transaction/i.test(item)));
+});
+
 test("missing portfolio is a blocker", () => {
   const result = evaluateIntegrationReadiness(
     facts({

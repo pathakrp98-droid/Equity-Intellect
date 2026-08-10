@@ -33,6 +33,19 @@ test("calculates average cost, cash and unrealized P&L from the ledger", () => {
   assert.ok(result.xirrPct !== null);
 });
 
+test("uses a direct cash balance without requiring a cash transaction", () => {
+  const result = calculatePortfolio(
+    [{ type: "buy", ticker: "TEST", quantity: 10, price: 100, tradeDate: day("2025-01-02") }],
+    [{ ticker: "TEST", price: 120 }],
+    day("2026-01-01"),
+    25_000,
+  );
+  assert.equal(result.cashBalance, 25_000);
+  assert.equal(result.marketValue, 1_200);
+  assert.equal(result.totalValue, 26_200);
+  assert.equal(result.totalPnl, 200);
+});
+
 test("uses weighted average cost for a partial sell", () => {
   const result = calculatePortfolio(
     [

@@ -83,6 +83,26 @@ function jsonClone<T>(value: T): T {
 }
 
 class LiveDataService {
+  async refreshDaily(userId: string) {
+    if (!listLiveDataProviders().some((provider) => provider.isConfigured())) {
+      return { attempted: false, reason: "no_provider_configured" as const };
+    }
+    const [latestRun] = await db
+      .select({ startedAt: marketProviderRunsTable.startedAt })
+      .from(marketProviderRunsTable)
+      .where(eq(marketProviderRunsTable.userId, userId))
+      .orderBy(desc(marketProviderRunsTable.startedAt))
+      .limit(1);
+    const due = !latestRun || Date.now() - latestRun.startedAt.getTime() >= 24 * 60 * 60 * 1000;
+    if (!due) return { attempted: false, reason: "already_refreshed_today" as const };
+    const result = await this.refresh(userId, { force: false });
+    return {
+      attempted: true,
+      refreshedAt: result.refreshedAt,
+      diagnostics: result.diagnostics,
+    };
+  }
+
   async getPreferences(userId: string) {
     const [existing] = await db
       .select()

@@ -267,6 +267,7 @@ export function calculatePortfolio(
   inputTransactions: EngineTransaction[],
   quotes: MarketQuote[] = [],
   asOf = new Date(),
+  cashBalanceOverride?: number,
 ): PortfolioCalculation {
   const transactions = [...inputTransactions].sort((a, b) => {
     const dateDifference = toDate(a.tradeDate).getTime() - toDate(b.tradeDate).getTime();
@@ -440,6 +441,14 @@ export function calculatePortfolio(
       unrealizedPnl,
     };
   });
+
+  if (cashBalanceOverride !== undefined) {
+    if (!Number.isFinite(cashBalanceOverride) || cashBalanceOverride < 0) {
+      throw new Error("Cash balance must be zero or greater");
+    }
+    netContributions += cashBalanceOverride - cashBalance;
+    cashBalance = cashBalanceOverride;
+  }
 
   const marketValue = provisional.reduce((sum, item) => sum + item.marketValue, 0);
   const totalValue = marketValue + cashBalance;

@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   Loader2,
   Plus,
+  Pencil,
   RefreshCw,
   Trash2,
   Upload,
@@ -24,14 +25,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   useCreatePortfolioTransaction,
+  useCreateDirectHolding,
   useDeletePortfolioTransaction,
   useImportHoldingsCsv,
   usePortfolioOverview,
   usePortfolioTransactions,
   useRecalculatePortfolio,
+  useSetCashBalance,
+  useUpdateDirectHolding,
   useUpdatePortfolioPrices,
   type CreateTransactionPayload,
   type HoldingsImportResponse,
+  type PortfolioHolding,
   type PortfolioTransaction,
   type TransactionType,
 } from "@/features/portfolio/api";
@@ -149,6 +154,8 @@ export function PortfolioEngine() {
         xirrPct={snapshot?.xirrPct ?? null}
       />
 
+      <CashBalanceInput balance={snapshot?.cashBalance ?? 0} />
+
       <Tabs defaultValue="holdings" className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
           <TabsTrigger value="holdings">Holdings</TabsTrigger>
@@ -201,7 +208,7 @@ function SummaryCards({
       value: money(marketValue),
       detail: "Open holdings",
     },
-    { label: "Cash", value: money(cashBalance), detail: "Ledger-derived" },
+    { label: "Cash", value: money(cashBalance), detail: "Direct balance" },
     {
       label: "Total P&L",
       value: money(totalPnl),
@@ -242,10 +249,30 @@ function SummaryCards({
   );
 }
 
+function CashBalanceInput({ balance }: { balance: number }) {
+  const [value, setValue] = useState(String(balance));
+  const update = useSetCashBalance();
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+        <Field label="Cash balance">
+          <Input type="number" min="0" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} />
+        </Field>
+        <Button disabled={update.isPending || !value} onClick={() => update.mutate(Number(value))}>
+          {update.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Save cash balance
+        </Button>
+        <p className="text-xs text-muted-foreground sm:pb-2">No deposit or transaction history required.</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function HoldingsPanel() {
   const overview = usePortfolioOverview();
   const [, navigate] = useLocation();
   const holdings = overview.data?.holdings ?? [];
+  const [editing, setEditing] = useState<PortfolioHolding | null | undefined>(undefined);
 
   if (holdings.length === 0) {
     return (
@@ -253,17 +280,44 @@ function HoldingsPanel() {
         <CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
           <WalletCards className="h-10 w-10 text-muted-foreground" />
           <h2 className="mt-4 text-lg font-semibold">No holdings yet</h2>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Upload your current holdings CSV. No transaction history, deposit,
-            settlement date or tradebook is required.
-          </p>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">Add a holding manually or upload your current holdings CSV. No transaction history is required.</p>
+          <Button className="mt-4" onClick={() => setEditing(null)}><Plus className="mr-2 h-4 w-4" /> Add holding</Button>
+          {editing === null && <HoldingForm onClose={() => setEditing(undefined)} />}
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className="overflow-hidden">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <PriceRefreshStatus overview={overview.data} />
+        <Button onClick={() => setEditing(null)}><Plus className="mr-2 h-4 w-4" /> Add holding</Button>
+      </div>
+      {editing !== undefined && <HoldingForm holding={editing ?? undefined} onClose={() => setEditing(undefined)} />}
+      <div className="grid gap-3 md:hidden">
+        {holdings.map((holding) => (
+          <Card key={holding.ticker}>
+            <CardContent className="space-y-4 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div><p className="font-semibold">{holding.ticker}</p><p className="text-xs text-muted-foreground">{holding.name} · {holding.sector}</p></div>
+                {holding.directHoldingId !== null && <Button size="sm" variant="outline" onClick={() => setEditing(holding)}><Pencil className="h-3.5 w-3.5" /></Button>}
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <Metric label="Quantity" value={numberFormatter.format(holding.quantity)} />
+                <Metric label="Market value" value={money(holding.marketValue)} />
+                <Metric label="Average cost" value={money(holding.averageCost)} />
+                <Metric label="Market price" value={money(holding.marketPrice)} />
+                <Metric label="P&L" value={`${money(holding.unrealizedPnl)} (${percent(holding.unrealizedPnlPct)})`} />
+                <Metric label="Allocation" value={percent(holding.allocationPct)} />
+              </div>
+              <PriceBadge holding={holding} />
+              <Button className="w-full" variant="outline" onClick={() => navigate(`/research?ticker=${holding.ticker}`)}>Open thesis</Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <Card className="hidden overflow-hidden md:block">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1050px] text-sm">
           <thead className="bg-secondary/50 text-xs text-muted-foreground">
@@ -280,6 +334,7 @@ function HoldingsPanel() {
               <th className="px-4 py-3 text-right font-medium">Allocation</th>
               <th className="px-4 py-3 text-left font-medium">Price source</th>
               <th className="px-4 py-3 text-left font-medium">Research</th>
+              <th className="px-4 py-3 text-left font-medium">Edit</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
@@ -345,18 +400,7 @@ function HoldingsPanel() {
                   {percent(holding.allocationPct)}
                 </td>
                 <td className="px-4 py-4">
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-1 text-[11px]",
-                      holding.priceSource !== "last_transaction"
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
-                        : "border-amber-500/30 bg-amber-500/10 text-amber-500",
-                    )}
-                  >
-                    {holding.priceSource !== "last_transaction"
-                      ? "Market quote"
-                      : "Last transaction"}
-                  </span>
+                  <PriceBadge holding={holding} />
                 </td>
                 <td className="px-4 py-4">
                   <Button
@@ -370,13 +414,44 @@ function HoldingsPanel() {
                     Open thesis
                   </Button>
                 </td>
+                <td className="px-4 py-4">{holding.directHoldingId !== null && <Button size="sm" variant="ghost" onClick={() => setEditing(holding)}><Pencil className="h-4 w-4" /></Button>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </Card>
+      </Card>
+    </div>
   );
+}
+
+function PriceBadge({ holding }: { holding: PortfolioHolding }) {
+  const tone = holding.priceStatus === "fresh" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500" : holding.priceStatus === "stale" ? "border-amber-500/30 bg-amber-500/10 text-amber-500" : "border-destructive/30 bg-destructive/10 text-destructive";
+  const manual = ["manual", "manual_holding", "holdings_csv"].includes(holding.priceSource);
+  return <span className={cn("inline-flex rounded-full border px-2 py-1 text-[11px]", tone)} title={holding.priceAsOf ? `Updated ${new Date(holding.priceAsOf).toLocaleString()}` : "No live quote received"}>{holding.priceStatus === "fresh" ? manual ? "Current · manual" : "Live · current" : holding.priceStatus === "stale" ? "Quote stale" : "Quote unavailable"}</span>;
+}
+
+function PriceRefreshStatus({ overview }: { overview: ReturnType<typeof usePortfolioOverview>["data"] }) {
+  const refresh = overview?.autoRefresh;
+  const failed = refresh?.error || refresh?.diagnostics?.some((item) => item.status === "failed");
+  const message = refresh?.reason === "no_provider_configured" ? "Automatic prices need a live-data provider" : refresh?.attempted ? "Daily prices refreshed automatically" : "Daily automatic refresh is current";
+  return <p className={cn("text-xs", failed ? "text-destructive" : "text-muted-foreground")}>{failed ? `Daily price refresh had errors${refresh?.error ? `: ${refresh.error}` : ""}` : message}</p>;
+}
+
+const EMPTY_HOLDING = { symbol: "", name: "", isin: "", exchange: "NSE", sector: "", quantity: "", averageCost: "", previousClose: "" };
+
+function HoldingForm({ holding, onClose }: { holding?: PortfolioHolding; onClose: () => void }) {
+  const [form, setForm] = useState(holding ? { symbol: holding.ticker, name: holding.name, isin: holding.isin ?? "", exchange: holding.exchange, sector: holding.sector, quantity: String(holding.quantity), averageCost: String(holding.averageCost), previousClose: String(holding.previousClose ?? holding.marketPrice) } : EMPTY_HOLDING);
+  const create = useCreateDirectHolding();
+  const update = useUpdateDirectHolding();
+  const mutation = holding ? update : create;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const payload = { ...form, quantity: Number(form.quantity), averageCost: Number(form.averageCost), previousClose: Number(form.previousClose) };
+    const options = { onSuccess: onClose };
+    if (holding?.directHoldingId) update.mutate({ id: holding.directHoldingId, payload }, options); else create.mutate(payload, options);
+  };
+  return <Card><CardHeader><CardTitle className="text-base">{holding ? `Edit ${holding.ticker}` : "Add holding"}</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" onSubmit={submit}>{([ ["symbol", "Symbol"], ["name", "Company name"], ["sector", "Sector"], ["exchange", "Exchange"], ["quantity", "Quantity"], ["averageCost", "Average cost"], ["previousClose", "Current / previous close"], ["isin", "ISIN (optional)"] ] as const).map(([key, label]) => <Field key={key} label={label}><Input required={key !== "isin" && key !== "name" && key !== "sector"} type={["quantity", "averageCost", "previousClose"].includes(key) ? "number" : "text"} min={key === "quantity" ? "0.000001" : undefined} step="any" value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} /></Field>)}<div className="flex gap-2 sm:col-span-2 lg:col-span-4"><Button type="submit" disabled={mutation.isPending}>{mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save holding</Button><Button type="button" variant="outline" onClick={onClose}>Cancel</Button></div>{mutation.error && <p className="text-sm text-destructive sm:col-span-2 lg:col-span-4">{errorMessage(mutation.error)}</p>}</form></CardContent></Card>;
 }
 
 const EMPTY_TRANSACTION_FORM = {

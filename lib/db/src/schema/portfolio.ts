@@ -226,6 +226,7 @@ export const portfolioCashAccountsTable = pgTable(
       .references(() => portfoliosTable.id, { onDelete: "cascade" }),
     currency: varchar("currency", { length: 3 }).notNull().default("INR"),
     balance: doublePrecision("balance").notNull().default(0),
+    isManual: boolean("is_manual").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

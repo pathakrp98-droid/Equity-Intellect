@@ -5,8 +5,10 @@ import { Router, type Request, type Response } from "express";
 import {
   portfolioService,
   type CreateTransactionInput,
+  type DirectHoldingInput,
   type MarketPriceInput,
 } from "../services/portfolio/portfolioService";
+import { liveDataService } from "../services/liveData/liveDataService";
 import type { PortfolioTransactionType } from "../services/portfolio/engine";
 import { researchService } from "../services/research/researchService";
 
@@ -73,6 +75,21 @@ function parseDate(value: unknown, field: string, fallback?: Date): Date {
   const parsed = new Date(String(value));
   if (Number.isNaN(parsed.getTime())) throw new Error(`${field} is invalid`);
   return parsed;
+}
+
+function parseDirectHoldingBody(body: Record<string, unknown>): DirectHoldingInput {
+  return {
+    portfolioId: optionalPositiveInteger(body.portfolioId),
+    symbol: String(body.symbol ?? "").trim().toUpperCase(),
+    isin: typeof body.isin === "string" ? body.isin : null,
+    name: typeof body.name === "string" ? body.name : null,
+    exchange: typeof body.exchange === "string" ? body.exchange : "NSE",
+    sector: typeof body.sector === "string" ? body.sector : "Unclassified",
+    quantity: positiveNumber(body.quantity, "quantity"),
+    availableQuantity: optionalNumber(body.availableQuantity),
+    averageCost: positiveNumber(body.averageCost, "averageCost"),
+    previousClose: positiveNumber(body.previousClose, "previousClose"),
+  };
 }
 
 function parseTransactionBody(
@@ -166,7 +183,16 @@ router.get("/", async (req, res) => {
   if (!userId) return;
   try {
     const portfolioId = optionalPositiveInteger(req.query.portfolioId);
-    res.json(await portfolioService.getOverview(userId, portfolioId));
+    let autoRefresh;
+    try {
+      autoRefresh = await liveDataService.refreshDaily(userId);
+    } catch (error) {
+      autoRefresh = {
+        attempted: true,
+        error: error instanceof Error ? error.message : "Daily refresh failed",
+      };
+    }
+    res.json({ ...(await portfolioService.getOverview(userId, portfolioId)), autoRefresh });
   } catch (error) {
     sendError(res, error);
   }
@@ -239,6 +265,50 @@ router.post("/holdings/import", async (req, res) => {
         csv: body.csv,
       }),
     );
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/holdings", async (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    res.status(201).json(await portfolioService.createDirectHolding(
+      userId,
+      parseDirectHoldingBody(req.body as Record<string, unknown>),
+    ));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/holdings/:id", async (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    res.json(await portfolioService.updateDirectHolding(
+      userId,
+      positiveInteger(req.params.id, "holding id"),
+      parseDirectHoldingBody(req.body as Record<string, unknown>),
+    ));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/cash", async (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const body = req.body as Record<string, unknown>;
+    const balance = optionalNumber(body.balance);
+    if (balance === null || balance < 0) throw new Error("balance must be zero or greater");
+    res.json(await portfolioService.setCashBalance(
+      userId,
+      balance,
+      optionalPositiveInteger(body.portfolioId),
+    ));
   } catch (error) {
     sendError(res, error);
   }
