@@ -147,7 +147,6 @@ export function PortfolioEngine() {
       <SummaryCards
         totalValue={snapshot?.totalValue ?? 0}
         marketValue={snapshot?.marketValue ?? 0}
-        cashBalance={snapshot?.cashBalance ?? 0}
         totalPnl={snapshot?.totalPnl ?? 0}
         totalReturnPct={snapshot?.totalReturnPct ?? 0}
         xirrPct={snapshot?.xirrPct ?? null}
@@ -186,26 +185,23 @@ export function PortfolioEngine() {
 function SummaryCards({
   totalValue,
   marketValue,
-  cashBalance,
   totalPnl,
   totalReturnPct,
   xirrPct,
 }: {
   totalValue: number;
   marketValue: number;
-  cashBalance: number;
   totalPnl: number;
   totalReturnPct: number;
   xirrPct: number | null;
 }) {
   const cards = [
-    { label: "Total value", value: money(totalValue), detail: "Equity + cash" },
+    { label: "Total value", value: money(totalValue), detail: "Current portfolio" },
     {
       label: "Market value",
       value: money(marketValue),
       detail: "Open holdings",
     },
-    { label: "Cash", value: money(cashBalance), detail: "Direct balance" },
     {
       label: "Total P&L",
       value: money(totalPnl),
@@ -222,7 +218,7 @@ function SummaryCards({
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => (
         <Card key={card.label} className="bg-card/70">
           <CardContent className="p-5">
