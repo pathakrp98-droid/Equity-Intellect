@@ -297,23 +297,6 @@ router.put("/holdings/:id", async (req, res) => {
   }
 });
 
-router.put("/cash", async (req, res) => {
-  const userId = requireUserId(req, res);
-  if (!userId) return;
-  try {
-    const body = req.body as Record<string, unknown>;
-    const balance = optionalNumber(body.balance);
-    if (balance === null || balance < 0) throw new Error("balance must be zero or greater");
-    res.json(await portfolioService.setCashBalance(
-      userId,
-      balance,
-      optionalPositiveInteger(body.portfolioId),
-    ));
-  } catch (error) {
-    sendError(res, error);
-  }
-});
-
 router.get("/holdings/template.csv", (req, res) => {
   const userId = requireUserId(req, res);
   if (!userId) return;

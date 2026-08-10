@@ -499,7 +499,7 @@ export class PortfolioService {
 
   async recalculate(userId: string, portfolioId?: number): Promise<PortfolioCalculation> {
     const portfolio = await this.getPortfolio(userId, portfolioId);
-    const [directHoldings, transactions, prices, accounts, cashAccount] = await Promise.all([
+    const [directHoldings, transactions, prices, accounts] = await Promise.all([
       db
         .select()
         .from(portfolioDirectHoldingsTable)
@@ -518,12 +518,6 @@ export class PortfolioService {
         .select()
         .from(brokerAccountsTable)
         .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
-      db
-        .select()
-        .from(portfolioCashAccountsTable)
-        .where(eq(portfolioCashAccountsTable.portfolioId, portfolio.id))
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
     ]);
 
     const brokerNames = new Map(
@@ -570,7 +564,6 @@ export class PortfolioService {
           ),
       prices.map(asMarketQuote),
       new Date(),
-      cashAccount?.isManual ? cashAccount.balance : undefined,
     );
 
     await db.transaction(async (tx) => {
@@ -607,7 +600,7 @@ export class PortfolioService {
           portfolioId: portfolio.id,
           currency: portfolio.baseCurrency,
           balance: calculation.cashBalance,
-          isManual: cashAccount?.isManual ?? false,
+          isManual: false,
           updatedAt: calculation.asOf,
         })
         .onConflictDoUpdate({
@@ -617,7 +610,7 @@ export class PortfolioService {
           ],
           set: {
             balance: calculation.cashBalance,
-            isManual: cashAccount?.isManual ?? false,
+            isManual: false,
             updatedAt: calculation.asOf,
           },
         });
@@ -772,25 +765,6 @@ export class PortfolioService {
         brokers: [...(brokersByTicker.get(holding.ticker) ?? new Set())],
       };
     });
-  }
-
-  async setCashBalance(userId: string, balance: number, portfolioId?: number) {
-    if (!Number.isFinite(balance) || balance < 0) {
-      throw new Error("balance must be zero or greater");
-    }
-    const portfolio = await this.getPortfolio(userId, portfolioId);
-    const now = new Date();
-    await db.insert(portfolioCashAccountsTable).values({
-      portfolioId: portfolio.id,
-      currency: portfolio.baseCurrency,
-      balance,
-      isManual: true,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: [portfolioCashAccountsTable.portfolioId, portfolioCashAccountsTable.currency],
-      set: { balance, isManual: true, updatedAt: now },
-    });
-    return this.recalculate(userId, portfolio.id);
   }
 
   async createDirectHolding(userId: string, input: DirectHoldingInput) {
