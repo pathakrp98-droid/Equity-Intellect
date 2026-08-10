@@ -78,6 +78,17 @@ export interface MorningBriefMarketPulse {
     asOf: string;
     source: string;
   }>;
+  materialNews?: Array<{
+    id: number;
+    ticker: string | null;
+    headline: string;
+    summary: string | null;
+    sentiment: string;
+    relevanceScore: number;
+    publishedAt: string;
+    source: string;
+    sourceUrl: string | null;
+  }>;
 }
 
 export interface MorningBriefPortfolioPulse {
@@ -91,6 +102,30 @@ export interface MorningBriefPortfolioPulse {
   largestPositionPct: number;
   holdingsCount: number;
   concentrationRisk: string;
+  movers?: Array<{
+    ticker: string;
+    name: string;
+    marketPrice: number;
+    dayChangePct: number;
+    dayPnl: number;
+    contributionPct: number;
+    direction: "gainer" | "loser" | "flat";
+    priceSource: string;
+    priceStatus: "fresh" | "stale" | "missing";
+  }>;
+  changeSincePrevious?: {
+    previousBriefDate: string | null;
+    portfolioValueChange: number | null;
+    dailyPnlChange: number | null;
+    largestPositionPctChange: number | null;
+    highPriorityActionChange: number | null;
+    summary: string;
+  };
+  guardian?: {
+    score: number;
+    band: string;
+    topRisks: string[];
+  } | null;
 }
 
 export interface MorningBriefAction {
@@ -99,12 +134,7 @@ export interface MorningBriefAction {
   ticker?: string | null;
   title: string;
   rationale: string;
-  actionType:
-    | "review"
-    | "research"
-    | "monitor"
-    | "rebalance"
-    | "verify_data";
+  actionType: "review" | "research" | "monitor" | "rebalance" | "verify_data";
   sourceIds: string[];
 }
 
@@ -287,10 +317,7 @@ export const morningBriefsTable = pgTable(
       .$type<MorningBriefEvent[]>()
       .notNull()
       .default([]),
-    risks: jsonb("risks")
-      .$type<MorningBriefRisk[]>()
-      .notNull()
-      .default([]),
+    risks: jsonb("risks").$type<MorningBriefRisk[]>().notNull().default([]),
     dataQuality: jsonb("data_quality")
       .$type<MorningBriefDataQuality>()
       .notNull(),
@@ -331,9 +358,7 @@ export const marketIntelligencePreferencesTable = pgTable(
     includeUpcomingEvents: boolean("include_upcoming_events")
       .notNull()
       .default(true),
-    staleMarketMinutes: integer("stale_market_minutes")
-      .notNull()
-      .default(720),
+    staleMarketMinutes: integer("stale_market_minutes").notNull().default(720),
     staleNewsHours: integer("stale_news_hours").notNull().default(36),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -368,7 +393,8 @@ export const marketProviderRunsTable = pgTable(
 );
 
 export type MarketDataPointRow = typeof marketDataPointsTable.$inferSelect;
-export type InsertMarketDataPointRow = typeof marketDataPointsTable.$inferInsert;
+export type InsertMarketDataPointRow =
+  typeof marketDataPointsTable.$inferInsert;
 export type MarketNewsRow = typeof marketNewsTable.$inferSelect;
 export type InsertMarketNewsRow = typeof marketNewsTable.$inferInsert;
 export type MarketEventRow = typeof marketEventsTable.$inferSelect;

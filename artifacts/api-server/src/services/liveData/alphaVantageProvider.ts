@@ -47,7 +47,7 @@ async function fetchYahooQuote(providerSymbol: string) {
   url.searchParams.set("interval", "1d");
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), 8_000);
   try {
     const response = await fetch(url, {
       headers: {
@@ -122,42 +122,54 @@ export class AlphaVantageProvider implements LiveDataProvider {
   async fetchQuotes(
     context: LiveDataProviderContext,
   ): Promise<MarketPointInput[]> {
-    const points: MarketPointInput[] = [];
+    const pointsByIndex: Array<MarketPointInput | null> = context.symbols.map(
+      () => null,
+    );
     const failures: string[] = [];
+    let nextIndex = 0;
+    const workerCount = Math.min(4, context.symbols.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextIndex < context.symbols.length) {
+          const index = nextIndex++;
+          const symbol = context.symbols[index]!;
+          let lastError = "quote lookup failed";
 
-    for (const symbol of context.symbols) {
-      let lastError = "quote lookup failed";
+          for (const candidate of candidateSymbols(symbol)) {
+            try {
+              const quote = await fetchYahooQuote(candidate);
+              pointsByIndex[index] = {
+                kind: "equity",
+                symbol: symbol.ticker,
+                name: symbol.ticker,
+                value: quote.price,
+                change: quote.change,
+                changePct: quote.changePct,
+                unit: quote.currency,
+                region: quote.exchange,
+                source: "yahoo-finance",
+                sourceUrl: quote.url,
+                asOf: quote.asOf,
+                metadata: {
+                  providerSymbol: quote.providerSymbol,
+                  previousClose: quote.previousClose,
+                },
+              };
+              lastError = "";
+              break;
+            } catch (error) {
+              lastError =
+                error instanceof Error ? error.message : "quote lookup failed";
+            }
+          }
 
-      for (const candidate of candidateSymbols(symbol)) {
-        try {
-          const quote = await fetchYahooQuote(candidate);
-          points.push({
-            kind: "equity",
-            symbol: symbol.ticker,
-            name: symbol.ticker,
-            value: quote.price,
-            change: quote.change,
-            changePct: quote.changePct,
-            unit: quote.currency,
-            region: quote.exchange,
-            source: "yahoo-finance",
-            sourceUrl: quote.url,
-            asOf: quote.asOf,
-            metadata: {
-              providerSymbol: quote.providerSymbol,
-              previousClose: quote.previousClose,
-            },
-          });
-          lastError = "";
-          break;
-        } catch (error) {
-          lastError =
-            error instanceof Error ? error.message : "quote lookup failed";
+          if (lastError) failures.push(`${symbol.ticker}: ${lastError}`);
         }
-      }
-
-      if (lastError) failures.push(`${symbol.ticker}: ${lastError}`);
-    }
+      }),
+    );
+    const points = pointsByIndex.filter(
+      (point): point is MarketPointInput => point !== null,
+    );
 
     if (points.length === 0) {
       throw new Error(

@@ -349,7 +349,7 @@ class ResearchService {
         exchange: company.exchange,
         sector: company.sector ?? holding?.sector ?? "Unclassified",
         industry: company.industry,
-        currentPrice: company.currentPrice ?? holding?.marketPrice ?? null,
+        currentPrice: holding?.marketPrice ?? company.currentPrice ?? null,
         previousClose: company.previousClose ?? holding?.previousClose ?? null,
         marketCap: company.marketCap,
         pe: company.pe,

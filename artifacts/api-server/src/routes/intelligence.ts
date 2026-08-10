@@ -5,6 +5,7 @@ import {
   type UpdateMarketPreferencesInput,
 } from "../services/intelligence/marketIntelligenceService";
 import type { MarketImportPayload } from "../services/intelligence/types";
+import { liveDataService } from "../services/liveData/liveDataService";
 
 const router = Router();
 
@@ -23,8 +24,11 @@ function authenticated(handler: AuthenticatedHandler) {
     try {
       await handler(req, res, req.user.id);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected error";
-      const status = /required|invalid|must|unsupported|cannot|timezone/i.test(message)
+      const message =
+        error instanceof Error ? error.message : "Unexpected error";
+      const status = /required|invalid|must|unsupported|cannot|timezone/i.test(
+        message,
+      )
         ? 400
         : /not found/i.test(message)
           ? 404
@@ -59,11 +63,20 @@ function parseImportPayload(req: Request): MarketImportPayload {
 router.get(
   "/brief/latest",
   authenticated(async (req, res, userId) => {
+    const autoGenerate = booleanQuery(req.query.autoGenerate, true);
+    let refreshed = false;
+    if (autoGenerate) {
+      try {
+        const result = await liveDataService.refreshDaily(userId);
+        refreshed = result.attempted;
+      } catch {
+        // A provider failure must not prevent a portfolio-grounded brief.
+      }
+    }
     res.json(
-      await marketIntelligenceService.getLatestBrief(
-        userId,
-        booleanQuery(req.query.autoGenerate, true),
-      ),
+      refreshed
+        ? await marketIntelligenceService.generateBrief(userId)
+        : await marketIntelligenceService.getLatestBrief(userId, autoGenerate),
     );
   }),
 );
@@ -155,12 +168,14 @@ router.post(
 router.post(
   "/import",
   authenticated(async (req, res, userId) => {
-    res.status(201).json(
-      await marketIntelligenceService.importNormalizedData(
-        userId,
-        parseImportPayload(req),
-      ),
-    );
+    res
+      .status(201)
+      .json(
+        await marketIntelligenceService.importNormalizedData(
+          userId,
+          parseImportPayload(req),
+        ),
+      );
   }),
 );
 

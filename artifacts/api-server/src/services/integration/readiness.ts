@@ -150,7 +150,10 @@ export function evaluateIntegrationReadiness(
           : "Portfolio exists but needs fresher or more complete data.",
       [
         { label: "Holdings", value: facts.portfolio.holdings },
-        { label: "Transactions", value: facts.portfolio.transactions },
+        {
+          label: "Holdings with prices",
+          value: facts.portfolio.holdingsWithPrices,
+        },
         { label: "Stale prices", value: facts.portfolio.stalePrices },
       ],
       "/portfolio",
@@ -345,11 +348,26 @@ export function evaluateIntegrationReadiness(
   liveDataScore += facts.liveData.configuredProviders.length > 0 ? 4 : 0;
   liveDataScore += facts.liveData.cachedRecords > 0 ? 3 : 0;
   liveDataScore += facts.liveData.latestFetchAt ? 1 : 0;
+  const providerHealthy = ["success", "partial"].includes(
+    facts.intelligence.latestProviderStatus ?? "",
+  );
   const liveDataStatus: IntegrationModuleStatus =
-    facts.liveData.configuredProviders.length > 0 ? "ready" : "optional";
+    facts.liveData.configuredProviders.length === 0
+      ? "optional"
+      : providerHealthy && facts.portfolio.stalePrices === 0
+        ? "ready"
+        : "attention";
   if (facts.liveData.configuredProviders.length === 0) {
     recommendations.push(
       "Configure a live-data provider or continue with normalized manual imports.",
+    );
+  }
+  if (
+    facts.liveData.configuredProviders.length > 0 &&
+    (!providerHealthy || facts.portfolio.stalePrices > 0)
+  ) {
+    recommendations.push(
+      "Review the latest live-price refresh and any stale or missing tickers.",
     );
   }
   modules.push(
@@ -360,8 +378,10 @@ export function evaluateIntegrationReadiness(
       liveDataScore,
       10,
       liveDataStatus === "ready"
-        ? "At least one live-data provider is configured."
-        : "Live data is optional; manual normalized imports remain supported.",
+        ? "Live-price refresh and holding coverage are current."
+        : liveDataStatus === "attention"
+          ? "A provider is configured, but the latest refresh or price coverage needs attention."
+          : "Live data is optional; manual normalized imports remain supported.",
       [
         {
           label: "Providers",

@@ -9,10 +9,11 @@ import {
   morningBriefsTable,
   researchCompaniesTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
 
 import { portfolioService } from "../portfolio/portfolioService";
 import { researchService } from "../research/researchService";
+import { guardianService } from "../guardian/guardianService";
 import { buildMorningBrief } from "./briefEngine";
 import { marketIntelligenceProvider } from "./httpProvider";
 import { normalizeMarketImport } from "./normalization";
@@ -35,9 +36,14 @@ export interface UpdateMarketPreferencesInput {
   staleNewsHours?: number;
 }
 
-function clampInteger(value: number | undefined, min: number, max: number): number | undefined {
+function clampInteger(
+  value: number | undefined,
+  min: number,
+  max: number,
+): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isFinite(value)) throw new Error("Preference value must be numeric");
+  if (!Number.isFinite(value))
+    throw new Error("Preference value must be numeric");
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
@@ -51,6 +57,19 @@ function safeTimezone(value: string | undefined): string | undefined {
     throw new Error("timezone is not a valid IANA timezone");
   }
   return timezone;
+}
+
+function localDateKey(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 class MarketIntelligenceService {
@@ -231,7 +250,9 @@ class MarketIntelligenceService {
       equityPricesSynced:
         options.syncPortfolioPrices === false ? 0 : equityPrices.length,
       total:
-        normalized.points.length + normalized.news.length + normalized.events.length,
+        normalized.points.length +
+        normalized.news.length +
+        normalized.events.length,
       warnings: normalized.warnings,
     };
   }
@@ -243,9 +264,13 @@ class MarketIntelligenceService {
       .values({
         userId,
         provider: marketIntelligenceProvider.name,
-        status: marketIntelligenceProvider.isConfigured() ? "running" : "skipped",
+        status: marketIntelligenceProvider.isConfigured()
+          ? "running"
+          : "skipped",
         startedAt,
-        completedAt: marketIntelligenceProvider.isConfigured() ? null : startedAt,
+        completedAt: marketIntelligenceProvider.isConfigured()
+          ? null
+          : startedAt,
         metadata: {},
       })
       .returning();
@@ -280,7 +305,8 @@ class MarketIntelligenceService {
         .returning();
       return { run: updatedRun, configured: true, imported };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Provider refresh failed";
+      const message =
+        error instanceof Error ? error.message : "Provider refresh failed";
       const [updatedRun] = await db
         .update(marketProviderRunsTable)
         .set({ status: "failed", completedAt: new Date(), error: message })
@@ -295,7 +321,10 @@ class MarketIntelligenceService {
       .select()
       .from(marketDataPointsTable)
       .where(eq(marketDataPointsTable.userId, userId))
-      .orderBy(asc(marketDataPointsTable.kind), asc(marketDataPointsTable.name));
+      .orderBy(
+        asc(marketDataPointsTable.kind),
+        asc(marketDataPointsTable.name),
+      );
     return rows;
   }
 
@@ -317,7 +346,10 @@ class MarketIntelligenceService {
       .select()
       .from(marketNewsTable)
       .where(and(...conditions))
-      .orderBy(desc(marketNewsTable.publishedAt), desc(marketNewsTable.relevanceScore))
+      .orderBy(
+        desc(marketNewsTable.publishedAt),
+        desc(marketNewsTable.relevanceScore),
+      )
       .limit(Math.max(1, Math.min(200, options.limit ?? 50)));
   }
 
@@ -327,7 +359,8 @@ class MarketIntelligenceService {
   ) {
     const now = new Date();
     const until = new Date(
-      now.getTime() + Math.max(1, Math.min(365, options.days ?? 30)) * 86_400_000,
+      now.getTime() +
+        Math.max(1, Math.min(365, options.days ?? 30)) * 86_400_000,
     );
     const conditions = [
       eq(marketEventsTable.userId, userId),
@@ -374,18 +407,27 @@ class MarketIntelligenceService {
   }
 
   async generateBrief(userId: string, now = new Date()) {
-    const [overview, preferences, points, news, events, researchSignals] =
-      await Promise.all([
-        portfolioService.getOverview(userId),
-        this.getPreferences(userId),
-        this.getSnapshot(userId),
-        this.getNews(userId, { portfolioOnly: true, days: 14, limit: 100 }),
-        this.getCalendar(userId, { portfolioOnly: true, days: 30 }),
-        this.getResearchSignals(userId),
-      ]);
-    if (!overview.snapshot) throw new Error("Portfolio snapshot is unavailable");
+    const [
+      overview,
+      preferences,
+      points,
+      news,
+      events,
+      researchSignals,
+      guardian,
+    ] = await Promise.all([
+      portfolioService.getOverview(userId),
+      this.getPreferences(userId),
+      this.getSnapshot(userId),
+      this.getNews(userId, { portfolioOnly: true, days: 14, limit: 100 }),
+      this.getCalendar(userId, { portfolioOnly: true, days: 30 }),
+      this.getResearchSignals(userId),
+      guardianService.getHealth(userId, false),
+    ]);
+    if (!overview.snapshot)
+      throw new Error("Portfolio snapshot is unavailable");
 
-    const brief = buildMorningBrief({
+    const briefInput = {
       now,
       providerConfigured: marketIntelligenceProvider.isConfigured(),
       portfolio: {
@@ -413,12 +455,45 @@ class MarketIntelligenceService {
         unrealizedPnl: holding.unrealizedPnl,
         unrealizedPnlPct: holding.unrealizedPnlPct,
         priceSource: holding.priceSource,
+        priceStatus: holding.priceStatus,
+        priceAsOf: holding.priceAsOf,
       })),
       researchSignals,
       marketPoints: points as BriefMarketPoint[],
       news: news as BriefNewsItem[],
       events: events as BriefEventItem[],
       preferences: preferences as BriefPreferences,
+      guardian: {
+        score: guardian.score,
+        band: guardian.band,
+        topRisks: guardian.topRisks,
+      },
+    };
+    const provisionalBrief = buildMorningBrief(briefInput);
+    const [previousBrief] = await db
+      .select({
+        briefDate: morningBriefsTable.briefDate,
+        portfolioPulse: morningBriefsTable.portfolioPulse,
+        priorityActions: morningBriefsTable.priorityActions,
+      })
+      .from(morningBriefsTable)
+      .where(
+        and(
+          eq(morningBriefsTable.userId, userId),
+          ne(morningBriefsTable.briefDate, provisionalBrief.briefDate),
+        ),
+      )
+      .orderBy(desc(morningBriefsTable.generatedAt))
+      .limit(1);
+    const brief = buildMorningBrief({
+      ...briefInput,
+      previousBrief: previousBrief
+        ? {
+            briefDate: previousBrief.briefDate,
+            portfolioPulse: previousBrief.portfolioPulse,
+            priorityActions: previousBrief.priorityActions,
+          }
+        : null,
     });
 
     const [saved] = await db
@@ -462,13 +537,20 @@ class MarketIntelligenceService {
   }
 
   async getLatestBrief(userId: string, autoGenerate = true) {
-    const [latest] = await db
-      .select()
-      .from(morningBriefsTable)
-      .where(eq(morningBriefsTable.userId, userId))
-      .orderBy(desc(morningBriefsTable.generatedAt))
-      .limit(1);
-    if (latest || !autoGenerate) return latest ?? null;
+    const [latest, preferences] = await Promise.all([
+      db
+        .select()
+        .from(morningBriefsTable)
+        .where(eq(morningBriefsTable.userId, userId))
+        .orderBy(desc(morningBriefsTable.generatedAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      this.getPreferences(userId),
+    ]);
+    const today = localDateKey(new Date(), preferences.timezone);
+    if ((latest && latest.briefDate === today) || !autoGenerate) {
+      return latest ?? null;
+    }
     return this.generateBrief(userId);
   }
 
@@ -482,36 +564,38 @@ class MarketIntelligenceService {
   }
 
   async getProviderStatus(userId: string) {
-    const [latestRun, latestPoint, latestNews, latestEvent] = await Promise.all([
-      db
-        .select()
-        .from(marketProviderRunsTable)
-        .where(eq(marketProviderRunsTable.userId, userId))
-        .orderBy(desc(marketProviderRunsTable.startedAt))
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
-      db
-        .select({ asOf: marketDataPointsTable.asOf })
-        .from(marketDataPointsTable)
-        .where(eq(marketDataPointsTable.userId, userId))
-        .orderBy(desc(marketDataPointsTable.asOf))
-        .limit(1)
-        .then((rows) => rows[0]?.asOf ?? null),
-      db
-        .select({ publishedAt: marketNewsTable.publishedAt })
-        .from(marketNewsTable)
-        .where(eq(marketNewsTable.userId, userId))
-        .orderBy(desc(marketNewsTable.publishedAt))
-        .limit(1)
-        .then((rows) => rows[0]?.publishedAt ?? null),
-      db
-        .select({ eventAt: marketEventsTable.eventAt })
-        .from(marketEventsTable)
-        .where(eq(marketEventsTable.userId, userId))
-        .orderBy(desc(marketEventsTable.eventAt))
-        .limit(1)
-        .then((rows) => rows[0]?.eventAt ?? null),
-    ]);
+    const [latestRun, latestPoint, latestNews, latestEvent] = await Promise.all(
+      [
+        db
+          .select()
+          .from(marketProviderRunsTable)
+          .where(eq(marketProviderRunsTable.userId, userId))
+          .orderBy(desc(marketProviderRunsTable.startedAt))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
+        db
+          .select({ asOf: marketDataPointsTable.asOf })
+          .from(marketDataPointsTable)
+          .where(eq(marketDataPointsTable.userId, userId))
+          .orderBy(desc(marketDataPointsTable.asOf))
+          .limit(1)
+          .then((rows) => rows[0]?.asOf ?? null),
+        db
+          .select({ publishedAt: marketNewsTable.publishedAt })
+          .from(marketNewsTable)
+          .where(eq(marketNewsTable.userId, userId))
+          .orderBy(desc(marketNewsTable.publishedAt))
+          .limit(1)
+          .then((rows) => rows[0]?.publishedAt ?? null),
+        db
+          .select({ eventAt: marketEventsTable.eventAt })
+          .from(marketEventsTable)
+          .where(eq(marketEventsTable.userId, userId))
+          .orderBy(desc(marketEventsTable.eventAt))
+          .limit(1)
+          .then((rows) => rows[0]?.eventAt ?? null),
+      ],
+    );
     return {
       configured: marketIntelligenceProvider.isConfigured(),
       provider: marketIntelligenceProvider.name,

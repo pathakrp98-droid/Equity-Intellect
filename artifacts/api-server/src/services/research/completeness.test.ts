@@ -64,3 +64,20 @@ test("does not award full scenario points for short placeholders", () => {
   );
   assert.equal(scenario?.score, 0);
 });
+
+test("a saved target price counts as the central valuation target", () => {
+  const result = calculateResearchCompleteness({
+    company: { name: "Example", sector: "Technology" },
+    thesis: {
+      valuationMethodology: "Forward earnings multiple with scenario checks",
+      targetPrice: 125,
+      bullPrice: 150,
+      bearPrice: 90,
+    },
+  });
+  const valuation = result.sections.find(
+    (section) => section.key === "valuation",
+  );
+  assert.equal(valuation?.score, 15);
+  assert.equal(valuation?.complete, true);
+});
