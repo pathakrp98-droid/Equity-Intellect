@@ -506,10 +506,6 @@ export function runGuardianCheck(args: {
     hard.push({ ruleId: "OVERSELL", ruleName: "Available Quantity", currentValue: projected.holding?.quantity ?? 0, projectedValue: projected.quantity, message: `Requested quantity ${projected.quantity} exceeds the available ${projected.holding?.quantity ?? 0}.`, severity: "blocking" });
   }
 
-  if (projected.isBuy && projected.projectedCash < -0.01) {
-    hard.push({ ruleId: "NEGATIVE_CASH", ruleName: "Available Cash", currentValue: portfolio.cashBalance, projectedValue: projected.projectedCash, threshold: 0, message: "The proposed purchase would create a negative cash balance.", severity: "blocking" });
-  }
-
   if (projected.isBuy && projected.stockAllocationPct > limits.maxStockConcentrationPct) {
     hard.push({ ruleId: "MAX_STOCK_CONCENTRATION", ruleName: "Maximum Stock Concentration", currentValue: projected.holding?.allocationPct ?? 0, projectedValue: projected.stockAllocationPct, threshold: limits.maxStockConcentrationPct, message: `${ticker} would represent ${round(projected.stockAllocationPct, 1)}% of the portfolio versus the ${limits.maxStockConcentrationPct}% limit.`, severity: "blocking" });
   } else {
@@ -531,10 +527,6 @@ export function runGuardianCheck(args: {
 
   if (projected.isBuy && projected.sectorAllocationPct > limits.maxSectorConcentrationPct) {
     soft.push({ ruleId: "MAX_SECTOR_CONCENTRATION", ruleName: "Maximum Sector Concentration", projectedValue: projected.sectorAllocationPct, threshold: limits.maxSectorConcentrationPct, message: `${projected.sector} would represent ${round(projected.sectorAllocationPct, 1)}% of the portfolio.`, severity: "warning" });
-  }
-
-  if (projected.isBuy && projected.cashBufferPct < limits.minCashBufferPct) {
-    soft.push({ ruleId: "MIN_CASH_BUFFER", ruleName: "Minimum Cash Buffer", currentValue: portfolio.cashBufferPct, projectedValue: projected.cashBufferPct, threshold: limits.minCashBufferPct, message: `Cash would fall to ${round(projected.cashBufferPct, 1)}% versus the ${limits.minCashBufferPct}% minimum.`, severity: "warning" });
   }
 
   if (research?.isSmallCap && projected.isBuy && portfolio.smallCapExposurePct + projected.stockAllocationPct > limits.maxSmallCapExposurePct) {
@@ -672,18 +664,16 @@ export function calculateGuardianHealth(args: {
   const maxStock = portfolio.largestPositionPct;
   const maxSector = Math.max(0, ...portfolio.sectorAllocation.map((item) => item.allocationPct));
 
-  const thesisScore = Math.max(0, 25 - thesisBroken * 12 - thesisWeakening * 5);
-  const concentrationScore = Math.max(0, 20 - Math.max(0, maxStock - settings.portfolioLimits.maxStockConcentrationPct) * 2 - Math.max(0, maxSector - settings.portfolioLimits.maxSectorConcentrationPct));
-  const cashScore = portfolio.cashBufferPct >= settings.portfolioLimits.minCashBufferPct ? 15 : Math.max(0, (portfolio.cashBufferPct / Math.max(1, settings.portfolioLimits.minCashBufferPct)) * 15);
-  const researchScore = Math.min(20, weightedResearch * 0.2);
+  const thesisScore = Math.max(0, 30 - thesisBroken * 14 - thesisWeakening * 6);
+  const concentrationScore = Math.max(0, 25 - Math.max(0, maxStock - settings.portfolioLimits.maxStockConcentrationPct) * 2 - Math.max(0, maxSector - settings.portfolioLimits.maxSectorConcentrationPct));
+  const researchScore = Math.min(25, weightedResearch * 0.25);
   const drawdownScore = portfolio.maxDrawdownPct <= settings.portfolioLimits.maxPortfolioDrawdownPct ? 10 : Math.max(0, 10 - (portfolio.maxDrawdownPct - settings.portfolioLimits.maxPortfolioDrawdownPct));
   const dataScore = Math.max(0, Math.min(10, portfolio.priceCoveragePct / 10 - activeHighSeverityNews));
 
   const components: GuardianHealthResult["components"] = [
-    { key: "thesis", name: "Thesis Integrity", score: round(thesisScore), maxScore: 25, status: thesisBroken > 0 ? "breach" : thesisWeakening > 0 ? "warning" : "ok", description: `${thesisBroken} broken and ${thesisWeakening} weakening thesis records.` },
-    { key: "concentration", name: "Concentration", score: round(concentrationScore), maxScore: 20, status: maxStock > settings.portfolioLimits.maxStockConcentrationPct || maxSector > settings.portfolioLimits.maxSectorConcentrationPct ? "breach" : maxStock > settings.portfolioLimits.maxStockConcentrationPct * 0.8 || maxSector > settings.portfolioLimits.maxSectorConcentrationPct * 0.8 ? "warning" : "ok", description: `Largest stock ${round(maxStock, 1)}%; largest sector ${round(maxSector, 1)}%.` },
-    { key: "cash", name: "Liquidity Buffer", score: round(cashScore), maxScore: 15, status: portfolio.cashBufferPct < settings.portfolioLimits.minCashBufferPct ? "warning" : "ok", description: `Cash buffer ${round(portfolio.cashBufferPct, 1)}% versus ${settings.portfolioLimits.minCashBufferPct}% minimum.` },
-    { key: "research", name: "Research Readiness", score: round(researchScore), maxScore: 20, status: researchCoveragePct < 80 || weightedResearch < settings.preTradeRequirements.minResearchCompletenessScore ? "warning" : "ok", description: `${round(researchCoveragePct, 0)}% coverage; allocation-weighted completeness ${round(weightedResearch, 0)}/100.` },
+    { key: "thesis", name: "Thesis Integrity", score: round(thesisScore), maxScore: 30, status: thesisBroken > 0 ? "breach" : thesisWeakening > 0 ? "warning" : "ok", description: `${thesisBroken} broken and ${thesisWeakening} weakening thesis records.` },
+    { key: "concentration", name: "Concentration", score: round(concentrationScore), maxScore: 25, status: maxStock > settings.portfolioLimits.maxStockConcentrationPct || maxSector > settings.portfolioLimits.maxSectorConcentrationPct ? "breach" : maxStock > settings.portfolioLimits.maxStockConcentrationPct * 0.8 || maxSector > settings.portfolioLimits.maxSectorConcentrationPct * 0.8 ? "warning" : "ok", description: `Largest stock ${round(maxStock, 1)}%; largest sector ${round(maxSector, 1)}%.` },
+    { key: "research", name: "Research Readiness", score: round(researchScore), maxScore: 25, status: researchCoveragePct < 80 || weightedResearch < settings.preTradeRequirements.minResearchCompletenessScore ? "warning" : "ok", description: `${round(researchCoveragePct, 0)}% coverage; allocation-weighted completeness ${round(weightedResearch, 0)}/100.` },
     { key: "drawdown", name: "Drawdown Control", score: round(drawdownScore), maxScore: 10, status: portfolio.maxDrawdownPct > settings.portfolioLimits.maxPortfolioDrawdownPct ? "breach" : "ok", description: `Observed drawdown ${round(portfolio.maxDrawdownPct, 1)}%.` },
     { key: "data", name: "Data Quality", score: round(dataScore), maxScore: 10, status: portfolio.priceCoveragePct < 90 ? "warning" : "ok", description: `${round(portfolio.priceCoveragePct, 0)}% holdings have explicit market quotes; ${activeHighSeverityNews} high-severity news items active.` },
   ];
@@ -692,7 +682,6 @@ export function calculateGuardianHealth(args: {
   const topRisks: string[] = [];
   if (thesisBroken) topRisks.push(`${thesisBroken} holding thesis record${thesisBroken === 1 ? " is" : "s are"} broken.`);
   if (thesisWeakening) topRisks.push(`${thesisWeakening} holding thesis record${thesisWeakening === 1 ? " is" : "s are"} weakening.`);
-  if (portfolio.cashBufferPct < settings.portfolioLimits.minCashBufferPct) topRisks.push(`Cash buffer is below the ${settings.portfolioLimits.minCashBufferPct}% minimum.`);
   if (maxStock > settings.portfolioLimits.maxStockConcentrationPct) topRisks.push(`Largest position exceeds the ${settings.portfolioLimits.maxStockConcentrationPct}% stock limit.`);
   if (maxSector > settings.portfolioLimits.maxSectorConcentrationPct) topRisks.push(`Largest sector exceeds the ${settings.portfolioLimits.maxSectorConcentrationPct}% sector limit.`);
   if (researchCoveragePct < 100) topRisks.push(`${holdingsCount - covered} holding${holdingsCount - covered === 1 ? " lacks" : "s lack"} research coverage.`);
