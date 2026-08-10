@@ -31,7 +31,6 @@ import {
   usePortfolioOverview,
   usePortfolioTransactions,
   useRecalculatePortfolio,
-  useSetCashBalance,
   useUpdateDirectHolding,
   useUpdatePortfolioPrices,
   type CreateTransactionPayload,
@@ -154,8 +153,6 @@ export function PortfolioEngine() {
         xirrPct={snapshot?.xirrPct ?? null}
       />
 
-      <CashBalanceInput balance={snapshot?.cashBalance ?? 0} />
-
       <Tabs defaultValue="holdings" className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
           <TabsTrigger value="holdings">Holdings</TabsTrigger>
@@ -249,30 +246,12 @@ function SummaryCards({
   );
 }
 
-function CashBalanceInput({ balance }: { balance: number }) {
-  const [value, setValue] = useState(String(balance));
-  const update = useSetCashBalance();
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-        <Field label="Cash balance">
-          <Input type="number" min="0" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} />
-        </Field>
-        <Button disabled={update.isPending || !value} onClick={() => update.mutate(Number(value))}>
-          {update.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save cash balance
-        </Button>
-        <p className="text-xs text-muted-foreground sm:pb-2">No deposit or transaction history required.</p>
-      </CardContent>
-    </Card>
-  );
-}
-
 function HoldingsPanel() {
   const overview = usePortfolioOverview();
   const [, navigate] = useLocation();
   const holdings = overview.data?.holdings ?? [];
   const [editing, setEditing] = useState<PortfolioHolding | null | undefined>(undefined);
+  const [editingPrice, setEditingPrice] = useState<PortfolioHolding | null>(null);
 
   if (holdings.length === 0) {
     return (
@@ -295,6 +274,7 @@ function HoldingsPanel() {
         <Button onClick={() => setEditing(null)}><Plus className="mr-2 h-4 w-4" /> Add holding</Button>
       </div>
       {editing !== undefined && <HoldingForm holding={editing ?? undefined} onClose={() => setEditing(undefined)} />}
+      {editingPrice && <ManualPriceForm holding={editingPrice} onClose={() => setEditingPrice(null)} />}
       <div className="grid gap-3 md:hidden">
         {holdings.map((holding) => (
           <Card key={holding.ticker}>
@@ -312,6 +292,7 @@ function HoldingsPanel() {
                 <Metric label="Allocation" value={percent(holding.allocationPct)} />
               </div>
               <PriceBadge holding={holding} />
+              <Button className="w-full" variant="outline" onClick={() => setEditingPrice(holding)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit market price</Button>
               <Button className="w-full" variant="outline" onClick={() => navigate(`/research?ticker=${holding.ticker}`)}>Open thesis</Button>
             </CardContent>
           </Card>
@@ -363,7 +344,10 @@ function HoldingsPanel() {
                   {money(holding.averageCost)}
                 </td>
                 <td className="px-4 py-4 text-right font-mono">
-                  {money(holding.marketPrice)}
+                  <div className="flex items-center justify-end gap-1">
+                    {money(holding.marketPrice)}
+                    <Button type="button" size="sm" variant="ghost" aria-label={`Edit ${holding.ticker} market price`} onClick={() => setEditingPrice(holding)}><Pencil className="h-3.5 w-3.5" /></Button>
+                  </div>
                 </td>
                 <td className="px-4 py-4 text-right font-mono font-medium">
                   {money(holding.marketValue)}
@@ -436,6 +420,17 @@ function PriceRefreshStatus({ overview }: { overview: ReturnType<typeof usePortf
   const failed = refresh?.error || refresh?.diagnostics?.some((item) => item.status === "failed");
   const message = refresh?.reason === "no_provider_configured" ? "Automatic prices need a live-data provider" : refresh?.attempted ? "Daily prices refreshed automatically" : "Daily automatic refresh is current";
   return <p className={cn("text-xs", failed ? "text-destructive" : "text-muted-foreground")}>{failed ? `Daily price refresh had errors${refresh?.error ? `: ${refresh.error}` : ""}` : message}</p>;
+}
+
+function ManualPriceForm({ holding, onClose }: { holding: PortfolioHolding; onClose: () => void }) {
+  const [price, setPrice] = useState(String(holding.marketPrice || ""));
+  const [previousClose, setPreviousClose] = useState(String(holding.previousClose || holding.marketPrice || ""));
+  const update = useUpdatePortfolioPrices();
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    update.mutate([{ ticker: holding.ticker, price: Number(price), previousClose: Number(previousClose) }], { onSuccess: onClose });
+  };
+  return <Card className="border-primary/30"><CardHeader><CardTitle className="text-base">Edit {holding.ticker} market price</CardTitle></CardHeader><CardContent><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}><Field label="Current market price"><Input required type="number" min="0" step="any" value={price} onChange={(event) => setPrice(event.target.value)} /></Field><Field label="Previous close"><Input required type="number" min="0" step="any" value={previousClose} onChange={(event) => setPreviousClose(event.target.value)} /></Field><p className="text-xs text-muted-foreground sm:col-span-2">Use this when an ETF or other holding does not receive a live API quote. The value is saved as a manual price and used immediately in portfolio calculations.</p><div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={update.isPending || !price}>{update.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save market price</Button><Button type="button" variant="outline" onClick={onClose}>Cancel</Button></div>{update.error && <p className="text-sm text-destructive sm:col-span-2">{errorMessage(update.error)}</p>}</form></CardContent></Card>;
 }
 
 const EMPTY_HOLDING = { symbol: "", name: "", isin: "", exchange: "NSE", sector: "", quantity: "", averageCost: "", previousClose: "" };
