@@ -79,7 +79,6 @@ export const researchStatementSchema = z
   .strict();
 export type ResearchStatement = z.infer<typeof researchStatementSchema>;
 
-const snapshotSectionSchema = z.array(researchStatementSchema).min(1).max(20);
 const snapshotSectionKeys = [
   "whatYouOwn",
   "investmentCase",
@@ -89,17 +88,26 @@ const snapshotSectionKeys = [
   "assessment",
   "watchNext",
 ] as const;
+const factualSectionSchema = z.enum(["whatYouOwn", "whatChanged"]);
+const evaluativeSectionSchema = z.enum([
+  "investmentCase",
+  "risks",
+  "catalysts",
+  "assessment",
+  "watchNext",
+]);
+const snapshotClaimSchema = z.discriminatedUnion("section", [
+  researchStatementSchema.extend({ section: factualSectionSchema }),
+  researchStatementSchema.extend({
+    section: evaluativeSectionSchema,
+    kind: z.literal("ai_judgement"),
+  }),
+]);
 
 export const automatedResearchSnapshotSchema = z
   .object({
     securityType: securityTypeSchema,
-    whatYouOwn: snapshotSectionSchema,
-    investmentCase: snapshotSectionSchema,
-    whatChanged: snapshotSectionSchema,
-    risks: snapshotSectionSchema,
-    catalysts: snapshotSectionSchema,
-    assessment: snapshotSectionSchema,
-    watchNext: snapshotSectionSchema,
+    claims: z.array(snapshotClaimSchema).min(7).max(100),
     unknowns: z.array(z.string().min(1).max(2_000)).max(20),
     numericTarget: z.number().finite().positive().optional(),
     evidenceStrength: evidenceStrengthSchema,
@@ -109,15 +117,24 @@ export const automatedResearchSnapshotSchema = z
   })
   .strict()
   .superRefine((snapshot, context) => {
-    const claimCount = snapshotSectionKeys.reduce(
-      (count, key) => count + snapshot[key].length,
-      0,
-    );
-    if (claimCount > 100) {
-      context.addIssue({
-        code: "custom",
-        message: "A snapshot cannot contain more than 100 claims.",
-      });
+    for (const section of snapshotSectionKeys) {
+      const claimCount = snapshot.claims.filter(
+        (claim) => claim.section === section,
+      ).length;
+      if (claimCount === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["claims"],
+          message: `The ${section} section requires at least one statement.`,
+        });
+      }
+      if (claimCount > 20) {
+        context.addIssue({
+          code: "custom",
+          path: ["claims"],
+          message: `The ${section} section cannot contain more than 20 statements.`,
+        });
+      }
     }
   });
 export type AutomatedResearchSnapshotPayload = z.infer<
@@ -139,12 +156,10 @@ export function validateSnapshotClaims(
     throw new Error("Numeric targets are only allowed for equity securities.");
   }
 
-  for (const sectionKey of snapshotSectionKeys) {
-    for (const statement of snapshot[sectionKey]) {
-      for (const evidenceId of statement.evidenceIds) {
-        if (!evidenceIds.has(evidenceId)) {
-          throw new Error(`Statement ${statement.id} references unknown evidence ${evidenceId}.`);
-        }
+  for (const statement of snapshot.claims) {
+    for (const evidenceId of statement.evidenceIds) {
+      if (!evidenceIds.has(evidenceId)) {
+        throw new Error(`Statement ${statement.id} references unknown evidence ${evidenceId}.`);
       }
     }
   }

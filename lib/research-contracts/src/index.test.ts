@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { automatedResearchSnapshotSchema } from "./index";
+import {
+  automatedResearchSnapshotJsonSchema,
+  automatedResearchSnapshotSchema,
+} from "./index";
 
 const statement = {
   id: "S1",
@@ -14,13 +17,15 @@ const statement = {
 function payload() {
   return {
     securityType: "equity",
-    whatYouOwn: [statement],
-    investmentCase: [statement],
-    whatChanged: [statement],
-    risks: [statement],
-    catalysts: [statement],
-    assessment: [statement],
-    watchNext: [statement],
+    claims: [
+      { ...statement, section: "whatYouOwn" },
+      { ...statement, id: "S2", kind: "ai_judgement", section: "investmentCase" },
+      { ...statement, id: "S3", section: "whatChanged" },
+      { ...statement, id: "S4", kind: "ai_judgement", section: "risks" },
+      { ...statement, id: "S5", kind: "ai_judgement", section: "catalysts" },
+      { ...statement, id: "S6", kind: "ai_judgement", section: "assessment" },
+      { ...statement, id: "S7", kind: "ai_judgement", section: "watchNext" },
+    ],
     unknowns: [],
     evidenceStrength: "strong",
     evidenceStrengthReason: "Primary evidence supports the research.",
@@ -36,7 +41,15 @@ test("snapshot contract rejects unknown fields", () => {
 test("snapshot contract caps a section at twenty statements", () => {
   const result = automatedResearchSnapshotSchema.safeParse({
     ...payload(),
-    risks: Array.from({ length: 21 }, (_, index) => ({ ...statement, id: `R${index}` })),
+    claims: [
+      ...payload().claims.filter((claim) => claim.section !== "risks"),
+      ...Array.from({ length: 21 }, (_, index) => ({
+        ...statement,
+        id: `R${index}`,
+        kind: "ai_judgement",
+        section: "risks",
+      })),
+    ],
   });
 
   assert.equal(result.success, false);
@@ -45,8 +58,61 @@ test("snapshot contract caps a section at twenty statements", () => {
 test("snapshot contract requires every layman section", () => {
   const result = automatedResearchSnapshotSchema.safeParse({
     ...payload(),
-    watchNext: [],
+    claims: payload().claims.filter((claim) => claim.section !== "watchNext"),
   });
 
   assert.equal(result.success, false);
+});
+
+test("snapshot contract rejects more than one hundred total claims", () => {
+  const hundredClaims = Array.from({ length: 100 }, (_, index) => ({
+    ...statement,
+    id: `C${index}`,
+    kind: index % 7 === 0 ? "fact" : "ai_judgement",
+    section: [
+      "whatYouOwn",
+      "investmentCase",
+      "whatChanged",
+      "risks",
+      "catalysts",
+      "assessment",
+      "watchNext",
+    ][index % 7],
+  }));
+  const validResult = automatedResearchSnapshotSchema.safeParse({
+    ...payload(),
+    claims: hundredClaims,
+  });
+  const invalidResult = automatedResearchSnapshotSchema.safeParse({
+    ...payload(),
+    claims: [...hundredClaims, { ...hundredClaims[0], id: "C100" }],
+  });
+
+  assert.equal(validResult.success, true);
+  assert.equal(invalidResult.success, false);
+});
+
+test("snapshot contract requires AI judgement labels for evaluative sections", () => {
+  const result = automatedResearchSnapshotSchema.safeParse({
+    ...payload(),
+    claims: payload().claims.map((claim) =>
+      claim.section === "risks" ? { ...claim, kind: "fact" } : claim,
+    ),
+  });
+
+  assert.equal(result.success, false);
+  if (result.success) return;
+  assert.ok(
+    result.error.issues.some(
+      (issue) => issue.path.join(".") === "claims.3.kind",
+    ),
+  );
+});
+
+test("Responses JSON Schema caps the aggregate claim array", () => {
+  const schema = automatedResearchSnapshotJsonSchema as {
+    properties?: { claims?: { maxItems?: number } };
+  };
+
+  assert.equal(schema.properties?.claims?.maxItems, 100);
 });

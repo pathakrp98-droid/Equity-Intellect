@@ -2,78 +2,72 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  type AutomatedResearchSnapshotPayload,
   validateSnapshotClaims,
 } from "@workspace/research-contracts";
 
 import { classifySecurity } from "./securityClassifier";
 
 function snapshot(
-  overrides: Partial<AutomatedResearchSnapshotPayload> = {},
-): AutomatedResearchSnapshotPayload {
+  overrides: Record<string, unknown> = {},
+) {
   return {
     securityType: "equity",
-    whatYouOwn: [
+    claims: [
       {
         id: "S1",
         text: "The holding is a listed equity.",
         kind: "fact",
         confidence: "high",
         evidenceIds: ["E1"],
+        section: "whatYouOwn",
       },
-    ],
-    investmentCase: [
       {
         id: "S2",
         text: "The investment case depends on execution.",
         kind: "ai_judgement",
         confidence: "moderate",
         evidenceIds: ["E1"],
+        section: "investmentCase",
       },
-    ],
-    whatChanged: [
       {
         id: "S3",
         text: "No material changes were identified.",
         kind: "fact",
         confidence: "high",
         evidenceIds: ["E1"],
+        section: "whatChanged",
       },
-    ],
-    risks: [
       {
         id: "S4",
         text: "Demand may weaken.",
         kind: "ai_judgement",
         confidence: "moderate",
         evidenceIds: ["E1"],
+        section: "risks",
       },
-    ],
-    catalysts: [
       {
         id: "S5",
         text: "A filing could provide a catalyst.",
         kind: "ai_judgement",
         confidence: "limited",
         evidenceIds: ["E1"],
+        section: "catalysts",
       },
-    ],
-    assessment: [
       {
         id: "S6",
         text: "The valuation needs continued review.",
         kind: "ai_judgement",
         confidence: "moderate",
         evidenceIds: ["E1"],
+        section: "assessment",
       },
-    ],
-    watchNext: [
       {
         id: "S7",
         text: "Watch the next earnings update.",
         kind: "ai_judgement",
         confidence: "moderate",
         evidenceIds: ["E1"],
+        section: "watchNext",
       },
     ],
     unknowns: [],
@@ -107,13 +101,14 @@ test("classification returns unknown when name and ticker signals conflict", () 
 
 test("snapshot validation rejects a fact without evidence", () => {
   const payload = snapshot({
-    whatYouOwn: [
+    claims: [
       {
         id: "S1",
         text: "The holding is a listed equity.",
         kind: "fact",
         confidence: "high",
         evidenceIds: [],
+        section: "whatYouOwn",
       },
     ],
   });
