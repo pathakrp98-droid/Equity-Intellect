@@ -88,8 +88,11 @@ The reconciler compares active holdings with research coverage.
 - A holding removed from all of a user's portfolios archives automated coverage but retains history.
 - Re-adding an archived holding restores it and enqueues a freshness check.
 - Multiple portfolios containing the same security share one user-scoped research record.
+- User/portfolio/security coverage memberships are stored separately, so removing a holding from one portfolio does not archive research while it remains active in another.
 
 The reconciliation operation must be idempotent and safe to run repeatedly.
+
+Portfolio recalculation writes a small holding-reconciliation event into the same database transaction that updates calculated holdings. The event fingerprint contains identity fields but excludes prices, P&L, allocation, and quantity, preventing quote refreshes from flooding the research queue. Material market-intelligence imports use the same transactional-outbox pattern for high-relevance company events.
 
 ### 7.2 Security Identity and Classification
 
@@ -161,7 +164,7 @@ Automated research is append-only. A successful run writes a new immutable snaps
 - claim-level classifications and evidence references;
 - comparison with the previous snapshot.
 
-Only one snapshot is current for a company at a time. Publishing a new current snapshot does not delete or modify older snapshots.
+The newest successfully published snapshot is current for a company. Publishing a new snapshot does not delete or modify older snapshots.
 
 Existing manual thesis fields, notes, risks, and catalysts remain user-owned. They are displayed separately as **Your research** and may be included as context for later automated runs, but automation never edits or deletes them.
 
@@ -197,17 +200,20 @@ Requirements:
 - concurrency and total run deadlines are bounded;
 - error metadata is safe for display and does not expose secrets;
 - a failed refresh leaves the last successful snapshot available and visibly stale.
+- holding and material-event triggers are recorded transactionally before the scheduled worker consumes them;
+- material-event bursts are coalesced and minimum refresh intervals are enforced.
 
 ### 7.7 Scheduling
 
-An in-process timer is not sufficient because a Replit autoscale deployment can sleep. AlphaDesk will expose a secret-authenticated scheduler endpoint that:
+An in-process timer is not sufficient because a Replit autoscale deployment can sleep. AlphaDesk will provide a one-shot research worker command that:
 
 1. acquires a global scheduler lease;
 2. finds due holdings across users;
 3. enqueues idempotent research jobs;
-4. returns promptly without waiting for all research to finish.
+4. processes a bounded batch of queued jobs synchronously; and
+5. exits after recording the batch result.
 
-A Replit scheduled deployment or equivalent external HTTPS scheduler will invoke this endpoint daily. Portfolio and Research page requests may also run a lightweight reconciliation, but page loads must not block on evidence retrieval or AI generation.
+A Replit Scheduled Deployment will run this command every 15 minutes in a separate scheduled environment, which continues to work while the autoscale web deployment sleeps. Replit documents Scheduled Deployments as command-line jobs intended for periodic background processing. Each tick consumes holding/material events and due jobs, while per-user preferences ensure a full no-event refresh is enqueued no more than once per configured daily cadence. The run command and required deployment-scoped secrets will be documented in the deployment checklist. Portfolio and Research page requests may read job state, but page loads must not block on evidence retrieval or AI generation.
 
 Refresh policy:
 
@@ -274,19 +280,23 @@ The existing user-and-ticker uniqueness rule must be migrated carefully. Current
 
 ### 9.2 Research Evidence
 
-Add `research_evidence` for normalized, deduplicated source metadata and evidence summaries. Uniqueness uses user, company, canonical URL, and content fingerprint as appropriate.
+Add snapshot-linked automated research sources for normalized, deduplicated source metadata and short evidence summaries. Uniqueness uses snapshot, citation key, canonical URL, and content fingerprint as appropriate; full source pages are not stored.
 
-### 9.3 Research Automation Runs
+### 9.3 Coverage Targets, Preferences, and Trigger Events
+
+Add user preferences for automation cadence and cost caps, user-portfolio-security coverage targets, and a transactional trigger-event outbox. These records make portfolio membership, due scheduling, and event consumption durable without depending on unstable calculated holding row IDs.
+
+### 9.4 Research Automation Runs
 
 Add `research_automation_runs` for trigger, status, idempotency key, lease, timing, model/provider metadata, item counts, and sanitized errors.
 
-### 9.4 Research Snapshots
+### 9.5 Research Snapshots
 
-Add `research_snapshots` for immutable versioned structured payloads, change summary, evidence-quality result, freshness, model/provider metadata, and current-state marker.
+Add `research_snapshots` for immutable versioned structured payloads, change summary, evidence-quality result, freshness, and model/provider metadata. The newest successful snapshot is selected as current rather than updating older snapshot rows.
 
 Snapshot payloads must be validated by a shared strict schema on write and read. Claim objects carry classification, confidence, and evidence IDs.
 
-### 9.5 Migration Safety
+### 9.6 Migration Safety
 
 - Additive schema changes precede read-path changes.
 - Existing records are backfilled without deleting or rewriting research text.
@@ -392,7 +402,7 @@ Add authenticated endpoints for:
 - reading job status and sanitized errors;
 - correcting an unresolved security identity.
 
-Add a separate secret-authenticated scheduler endpoint. It must not accept a user ID from an untrusted query parameter and must not expose user research in its response.
+Add a one-shot scheduled-worker command. It runs as a separate Replit Scheduled Deployment and does not expose an internet-facing scheduler endpoint.
 
 Existing research endpoints remain compatible.
 
@@ -449,7 +459,7 @@ The complete product is delivered through three dependent milestones. Each miles
 
 - holding reconciliation triggers;
 - job queue, leases, retries, idempotency, and recovery;
-- scheduler endpoint and Replit scheduling documentation/configuration;
+- scheduled worker and Replit Scheduled Deployment documentation/configuration;
 - refresh policy and job-status APIs;
 - reliability and concurrency tests.
 
@@ -473,7 +483,7 @@ The complete product is delivered through three dependent milestones. Each miles
 8. Older snapshots and all user-authored research remain unchanged.
 9. Concurrent triggers create no more than one active job for the same user, security, and refresh reason.
 10. A failed refresh preserves the prior snapshot and shows a visible stale/error state.
-11. Daily scheduled refresh works through an external/Replit scheduler while the web app can sleep.
+11. A 15-minute Replit Scheduled Deployment worker consumes durable events/jobs while daily cadence rules prevent unnecessary full refreshes, even when the autoscale web app sleeps.
 12. Morning Brief, Guardian, and Alerts consume the latest successful snapshot and surface important changes.
 13. Existing holdings CSV import, manual holdings, quotes, manual market prices, auth, and production persistence continue to work.
 14. Build, typecheck, focused tests, migration validation, and smoke tests pass before deployment.
