@@ -30,7 +30,6 @@ const PRIMARY_DOMAINS = [
   "ftserussell.com",
 ];
 const EXCLUDED_SOURCE_TYPES = new Set(["social", "forum", "aggregator", "excluded"]);
-const PRIMARY_SOURCE_TYPES = new Set(["amc", "index_provider", "exchange", "regulator"]);
 const TRACKING_PARAMETER = /^(utm_[a-z0-9_]+|gclid|dclid|fbclid|mc_cid|mc_eid|_ga|_gl|ref)$/i;
 
 export interface ResearchIdentityInput {
@@ -77,18 +76,51 @@ export interface EvidenceStrengthInput {
   decisionRelevantUnknownCount?: number;
 }
 
+function isPrivateIpv4(value: number): boolean {
+  const a = value >>> 24;
+  const b = value >>> 16 & 0xff;
+  return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
+    a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) ||
+    a === 100 && b >= 64 && b <= 127 || a === 198 && (b === 18 || b === 19) || a >= 224;
+}
+
+function ipv4Value(host: string): number {
+  return host.split(".").reduce((value, part) => value * 256 + Number(part), 0);
+}
+
+function ipv6Value(host: string): bigint | null {
+  const address = host.replace(/^\[|\]$/g, "").toLowerCase();
+  const halves = address.split("::");
+  if (halves.length > 2) return null;
+  const expand = (half: string) => half.length === 0 ? [] : half.split(":");
+  const before = expand(halves[0]);
+  const after = halves.length === 2 ? expand(halves[1]) : [];
+  if (before.some((part) => !/^[0-9a-f]{1,4}$/.test(part)) || after.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return null;
+  const missing = 8 - before.length - after.length;
+  if (missing < 0 || halves.length === 1 && missing !== 0) return null;
+  const words = [...before, ...Array(missing).fill("0"), ...after];
+  return words.reduce((value, word) => value << 16n | BigInt(`0x${word}`), 0n);
+}
+
+function inIpv6Prefix(address: bigint, network: bigint, prefixLength: number): boolean {
+  return address >> BigInt(128 - prefixLength) === network >> BigInt(128 - prefixLength);
+}
+
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host === "local" || host.endsWith(".local")) return true;
   const kind = isIP(host);
   if (kind === 4) {
-    const [a, b] = host.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
-      a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
-      a === 100 && b >= 64 && b <= 127;
+    return isPrivateIpv4(ipv4Value(host));
   }
   if (kind === 6) {
-    return host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("::ffff:127.");
+    const value = ipv6Value(host);
+    if (value === null) return true;
+    if (value === 0n || value === 1n) return true;
+    if (inIpv6Prefix(value, 0xfe80n << 112n, 10) || inIpv6Prefix(value, 0xfc00n << 112n, 7)) return true;
+    const embeddedIpv4 = Number(value & 0xffff_ffffn);
+    return inIpv6Prefix(value, 0xffffn << 32n, 96) && isPrivateIpv4(embeddedIpv4) ||
+      inIpv6Prefix(value, 0n, 96) && isPrivateIpv4(embeddedIpv4);
   }
   return false;
 }
@@ -147,9 +179,6 @@ export function classifyEvidenceTier(
   if (verifiedDomains.some((domain) => matchesDomain(hostname, domain))) {
     return { tier: "primary", canonicalUrl, reason: "The source is on a verified official domain." };
   }
-  if (sourceType && PRIMARY_SOURCE_TYPES.has(sourceType)) {
-    return { tier: "primary", canonicalUrl, reason: "The source has a primary institutional source type." };
-  }
   return { tier: "secondary", canonicalUrl, reason: "The secure source is treated as secondary until independently verified as primary." };
 }
 
@@ -178,16 +207,16 @@ export function calculateEvidenceStrength(input: EvidenceStrengthInput): Evidenc
   const gaps: string[] = [];
   const classified = input.evidence.map((item) => ({ item, ...classifyEvidenceTier(item, input.identity) }));
   const byId = new Map(classified.map((item) => [item.item.id, item]));
+  const citedEvidenceIds = new Set(input.claims.flatMap((claim) => claim.evidenceIds));
   const byCanonical = new Map<string, typeof classified[number]>();
   for (const item of classified) {
-    if (!item.canonicalUrl || item.tier === "excluded") continue;
+    if (!citedEvidenceIds.has(item.item.id) || !item.canonicalUrl || item.tier === "excluded") continue;
     const current = byCanonical.get(item.canonicalUrl);
     const currentDate = current ? validDate(current.item.publishedAt ?? current.item.retrievedAt)?.getTime() ?? 0 : -1;
     const itemDate = validDate(item.item.publishedAt ?? item.item.retrievedAt)?.getTime() ?? 0;
     if (!current || itemDate > currentDate || itemDate === currentDate && item.item.id < current.item.id) byCanonical.set(item.canonicalUrl, item);
   }
 
-  const usable = new Set([...byCanonical.values()].map((item) => item.item.id));
   const usableEvidenceForClaim = (claim: AutomatedResearchSnapshotPayload["claims"][number]) =>
     claim.evidenceIds.map((id) => byId.get(id)).filter((item): item is typeof classified[number] => Boolean(item && item.tier !== "excluded" && item.canonicalUrl));
   const citedClaims = input.claims.filter((claim) => usableEvidenceForClaim(claim).length > 0);
@@ -197,16 +226,25 @@ export function calculateEvidenceStrength(input: EvidenceStrengthInput): Evidenc
   const primaryCoverage = ratio(primaryClaims.length, input.claims.length);
   const sectionCoverage = ratio(REQUIRED_SECTIONS.filter((section) => citedSections.has(section)).length, REQUIRED_SECTIONS.length);
 
+  const now = new Date(input.now);
   let freshness = 0;
   if (byCanonical.size > 0) {
     const values = [...byCanonical.values()].map(({ item }) => {
       const published = item.publishedAt ? validDate(item.publishedAt) : null;
       const retrieved = validDate(item.retrievedAt);
+      if (published && published > now) {
+        gaps.push(`Publication date is in the future for ${item.id}; it was excluded from freshness.`);
+        return 0;
+      }
       if (!published) {
         gaps.push(`Publication date is missing for ${item.id}; retrieval time was used with a freshness cap.`);
-        return Math.min(0.5, retrieved ? freshnessValue(retrieved, new Date(input.now)) : 0);
+        if (retrieved && retrieved > now) {
+          gaps.push(`Retrieval date is in the future for ${item.id}; it was excluded from freshness.`);
+          return 0;
+        }
+        return Math.min(0.5, retrieved ? freshnessValue(retrieved, now) : 0);
       }
-      return freshnessValue(published, new Date(input.now));
+      return freshnessValue(published, now);
     });
     freshness = values.reduce((total, value) => total + value, 0) / values.length;
   }

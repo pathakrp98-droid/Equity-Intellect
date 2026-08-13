@@ -65,14 +65,45 @@ test("snapshot diff: treats an invalidation claim as material", () => {
   assert.equal(diffSnapshots(previous, current).material, true);
 });
 
-test("snapshot diff: treats a changed assessment conclusion and strength as material", () => {
+test("snapshot diff: treats an assessment-only conclusion change as material", () => {
   const previous = snapshot();
   const changedAssessment = snapshot({
     claims: previous.claims.map((claim) => claim.id === "assessment" ? { ...claim, text: "Assessment is now unfavourable." } : claim),
-    evidenceStrength: "limited",
   });
   const result = diffSnapshots(previous, changedAssessment);
   assert.equal(result.material, true);
-  assert.equal(result.evidenceStrengthChanged, true);
+  assert.equal(result.evidenceStrengthChanged, false);
   assert.ok(result.changedStatementIds.includes("assessment"));
+});
+
+test("snapshot diff: treats an evidence-strength-only change as material", () => {
+  const result = diffSnapshots(snapshot(), snapshot({ evidenceStrength: "limited" }));
+  assert.equal(result.material, true);
+  assert.equal(result.evidenceStrengthChanged, true);
+  assert.deepEqual(result.changedStatementIds, []);
+});
+
+test("snapshot diff: treats a resolved high-severity risk as material", () => {
+  const previous = snapshot({
+    claims: [...snapshot().claims, { id: "risk:critical:liquidity", text: "Liquidity risk is critical.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "risks" }],
+  });
+  const result = diffSnapshots(previous, snapshot());
+  assert.equal(result.material, true);
+  assert.deepEqual(result.resolvedRiskIds, ["risk:critical:liquidity"]);
+});
+
+test("snapshot diff: does not classify severity-boundary risk IDs as high severity", () => {
+  const result = diffSnapshots(snapshot(), snapshot({
+    claims: [...snapshot().claims, { id: "risk:highest:marketing", text: "Marketing risk rose.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "risks" }],
+  }));
+  assert.equal(result.material, false);
+  assert.deepEqual(result.addedRiskIds, ["risk:highest:marketing"]);
+});
+
+test("snapshot diff: fails closed when duplicate IDs could hide a material claim", () => {
+  const duplicated = snapshot({
+    claims: [...snapshot().claims, { id: "assessment", text: "Assessment is now unfavourable.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "assessment" }],
+  });
+  assert.throws(() => diffSnapshots(snapshot(), duplicated), /Duplicate claim ID: assessment/);
+  assert.throws(() => diffSnapshots(duplicated, snapshot()), /Duplicate claim ID: assessment/);
 });

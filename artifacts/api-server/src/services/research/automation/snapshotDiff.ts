@@ -19,7 +19,12 @@ function normalizedTextHash(text: string): string {
 }
 
 function claimsById(snapshot: AutomatedResearchSnapshotPayload): Map<string, Claim> {
-  return new Map(snapshot.claims.map((claim) => [claim.id, claim]));
+  const claims = new Map<string, Claim>();
+  for (const claim of snapshot.claims) {
+    if (claims.has(claim.id)) throw new Error(`Duplicate claim ID: ${claim.id}`);
+    claims.set(claim.id, claim);
+  }
+  return claims;
 }
 
 function isThesisStatus(claim: Claim): boolean {
@@ -31,7 +36,7 @@ function isInvalidation(claim: Claim): boolean {
 }
 
 function isHighSeverityRisk(claim: Claim): boolean {
-  return claim.section === "risks" && /(?:risk[-_:]?(?:high|severe|critical)|(?:high|severe|critical)[-_:]?risk)/i.test(claim.id);
+  return claim.section === "risks" && /(?:^|[-_:])(?:high|severe|critical)(?=$|[-_:])/i.test(claim.id);
 }
 
 function isAssessment(claim: Claim): boolean {
@@ -47,6 +52,8 @@ export function diffSnapshots(
   previous: AutomatedResearchSnapshotPayload | null | undefined,
   current: AutomatedResearchSnapshotPayload,
 ): SnapshotChangeSummary {
+  if (previous) claimsById(previous);
+  claimsById(current);
   if (!previous) {
     const addedRiskIds = current.claims.filter((claim) => claim.section === "risks").map((claim) => claim.id).sort();
     return {
