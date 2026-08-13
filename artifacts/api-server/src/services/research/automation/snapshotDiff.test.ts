@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { AutomatedResearchSnapshotPayload } from "@workspace/research-contracts";
+
+import { diffSnapshots } from "./snapshotDiff";
+
+function snapshot(overrides: Partial<AutomatedResearchSnapshotPayload> = {}): AutomatedResearchSnapshotPayload {
+  return {
+    securityType: "equity",
+    claims: [
+      { id: "own", text: "Listed equity.", kind: "fact", confidence: "high", evidenceIds: ["E1"], section: "whatYouOwn" },
+      { id: "thesis-status", text: "Thesis is intact.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "investmentCase" },
+      { id: "change", text: "No material change.", kind: "fact", confidence: "high", evidenceIds: ["E1"], section: "whatChanged" },
+      { id: "risk:medium:pricing", text: "Pricing pressure is possible.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "risks" },
+      { id: "catalyst", text: "Results are upcoming.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "catalysts" },
+      { id: "assessment", text: "Assessment remains favourable.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "assessment" },
+      { id: "watch", text: "Watch earnings.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "watchNext" },
+    ],
+    unknowns: [],
+    evidenceStrength: "moderate",
+    evidenceStrengthReason: "The evidence supports the core claims.",
+    generatedAt: "2026-08-13T00:00:00.000Z",
+    staleAt: "2026-08-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("snapshot diff: ignores whitespace, source ordering, and generated timestamps", () => {
+  const previous = snapshot();
+  const current = snapshot({
+    claims: previous.claims.map((claim) => claim.id === "catalyst" ? { ...claim, text: "  Results   are upcoming.  ", evidenceIds: ["E2", "E1"] } : claim),
+    generatedAt: "2026-08-14T00:00:00.000Z",
+  });
+  const result = diffSnapshots(previous, current);
+  assert.equal(result.material, false);
+  assert.deepEqual(result.changedStatementIds, []);
+});
+
+test("snapshot diff: marks changed thesis status as material", () => {
+  const previous = snapshot();
+  const current = snapshot({
+    claims: previous.claims.map((claim) => claim.id === "thesis-status" ? { ...claim, text: "Thesis is impaired." } : claim),
+  });
+  const result = diffSnapshots(previous, current);
+  assert.equal(result.material, true);
+  assert.deepEqual(result.changedStatementIds, ["thesis-status"]);
+});
+
+test("snapshot diff: surfaces a new high-severity risk as material", () => {
+  const previous = snapshot();
+  const current = snapshot({
+    claims: [...previous.claims, { id: "risk:high:liquidity", text: "Liquidity risk increased.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "risks" }],
+  });
+  const result = diffSnapshots(previous, current);
+  assert.equal(result.material, true);
+  assert.deepEqual(result.addedRiskIds, ["risk:high:liquidity"]);
+});
+
+test("snapshot diff: treats an invalidation claim as material", () => {
+  const previous = snapshot();
+  const current = snapshot({
+    claims: [...previous.claims, { id: "invalidation:margin", text: "Margins below the stated floor invalidate the thesis.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "investmentCase" }],
+  });
+  assert.equal(diffSnapshots(previous, current).material, true);
+});
+
+test("snapshot diff: treats a changed assessment conclusion and strength as material", () => {
+  const previous = snapshot();
+  const changedAssessment = snapshot({
+    claims: previous.claims.map((claim) => claim.id === "assessment" ? { ...claim, text: "Assessment is now unfavourable." } : claim),
+    evidenceStrength: "limited",
+  });
+  const result = diffSnapshots(previous, changedAssessment);
+  assert.equal(result.material, true);
+  assert.equal(result.evidenceStrengthChanged, true);
+  assert.ok(result.changedStatementIds.includes("assessment"));
+});
