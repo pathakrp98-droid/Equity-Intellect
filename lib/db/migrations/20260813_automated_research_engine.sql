@@ -42,6 +42,9 @@ ALTER TABLE research_companies
   ADD COLUMN IF NOT EXISTS identity_confidence double precision NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS automation_enabled boolean NOT NULL DEFAULT true;
 
+CREATE UNIQUE INDEX IF NOT EXISTS research_companies_id_user_uidx
+  ON research_companies(id, user_id);
+
 CREATE TABLE IF NOT EXISTS research_automation_preferences (
   id serial PRIMARY KEY,
   user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -110,6 +113,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS research_automation_trigger_events_user_dedupe
   ON research_automation_trigger_events(user_id, dedupe_key);
 CREATE INDEX IF NOT EXISTS research_automation_trigger_events_claim_idx
   ON research_automation_trigger_events(status, available_at, lease_expires_at, priority);
+CREATE UNIQUE INDEX IF NOT EXISTS research_automation_trigger_events_id_user_uidx
+  ON research_automation_trigger_events(id, user_id);
 
 CREATE TABLE IF NOT EXISTS research_automation_jobs (
   id serial PRIMARY KEY,
@@ -132,13 +137,21 @@ CREATE TABLE IF NOT EXISTS research_automation_jobs (
   error_message varchar(1000),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT research_automation_jobs_attempts_check CHECK (attempts >= 0 AND max_attempts >= 1)
+  CONSTRAINT research_automation_jobs_attempts_check CHECK (attempts >= 0 AND max_attempts >= 1),
+  CONSTRAINT research_automation_jobs_company_user_fk
+    FOREIGN KEY (company_id, user_id)
+    REFERENCES research_companies(id, user_id) ON DELETE CASCADE,
+  CONSTRAINT research_automation_jobs_trigger_user_fk
+    FOREIGN KEY (trigger_event_id, user_id)
+    REFERENCES research_automation_trigger_events(id, user_id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS research_automation_jobs_user_idempotency_uidx
   ON research_automation_jobs(user_id, idempotency_key);
 CREATE INDEX IF NOT EXISTS research_automation_jobs_claim_idx
   ON research_automation_jobs(status, run_after, lease_expires_at, priority);
+CREATE UNIQUE INDEX IF NOT EXISTS research_automation_jobs_id_user_company_uidx
+  ON research_automation_jobs(id, user_id, company_id);
 
 CREATE TABLE IF NOT EXISTS automated_research_snapshots (
   id serial PRIMARY KEY,
@@ -173,7 +186,10 @@ CREATE TABLE IF NOT EXISTS automated_research_snapshots (
     (input_tokens IS NULL OR input_tokens >= 0) AND
     (output_tokens IS NULL OR output_tokens >= 0) AND
     (latency_ms IS NULL OR latency_ms >= 0)
-  )
+  ),
+  CONSTRAINT automated_research_snapshots_job_user_company_fk
+    FOREIGN KEY (job_id, user_id, company_id)
+    REFERENCES research_automation_jobs(id, user_id, company_id) ON DELETE RESTRICT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS automated_research_snapshots_job_uidx
@@ -182,6 +198,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS automated_research_snapshots_company_version_u
   ON automated_research_snapshots(company_id, version);
 CREATE UNIQUE INDEX IF NOT EXISTS automated_research_snapshots_company_content_hash_uidx
   ON automated_research_snapshots(company_id, content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS automated_research_snapshots_id_user_company_uidx
+  ON automated_research_snapshots(id, user_id, company_id);
 
 CREATE TABLE IF NOT EXISTS automated_research_sources (
   id serial PRIMARY KEY,
@@ -201,7 +219,10 @@ CREATE TABLE IF NOT EXISTS automated_research_sources (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT automated_research_sources_https_url_check CHECK (canonical_url LIKE 'https://%'),
-  CONSTRAINT automated_research_sources_summary_length_check CHECK (char_length(evidence_summary) <= 1000)
+  CONSTRAINT automated_research_sources_summary_length_check CHECK (char_length(evidence_summary) <= 1000),
+  CONSTRAINT automated_research_sources_snapshot_user_company_fk
+    FOREIGN KEY (snapshot_id, user_id, company_id)
+    REFERENCES automated_research_snapshots(id, user_id, company_id) ON DELETE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS automated_research_sources_snapshot_citation_uidx
@@ -213,7 +234,9 @@ WITH holding_universe AS (
     h.portfolio_id,
     upper(trim(h.ticker)) AS ticker,
     max(coalesce(nullif(trim(h.name), ''), upper(trim(h.ticker)))) AS name,
-    max(h.exchange) AS exchange
+    max(h.exchange) AS exchange,
+    max(h.sector) AS sector,
+    NULL::varchar(24) AS isin
   FROM portfolio_holdings h
   JOIN portfolios p ON p.id = h.portfolio_id
   WHERE nullif(trim(h.ticker), '') IS NOT NULL AND h.quantity <> 0
@@ -224,14 +247,25 @@ WITH holding_universe AS (
     h.portfolio_id,
     upper(trim(h.symbol)) AS ticker,
     max(coalesce(nullif(trim(h.name), ''), upper(trim(h.symbol)))) AS name,
-    max(h.exchange) AS exchange
+    max(h.exchange) AS exchange,
+    max(h.sector) AS sector,
+    max(h.isin) AS isin
   FROM portfolio_direct_holdings h
   JOIN portfolios p ON p.id = h.portfolio_id
   WHERE nullif(trim(h.symbol), '') IS NOT NULL AND h.quantity <> 0
   GROUP BY p.user_id, h.portfolio_id, upper(trim(h.symbol))
 )
-INSERT INTO research_companies (user_id, ticker, name, exchange)
-SELECT user_id, ticker, max(name), max(exchange)
+INSERT INTO research_companies (
+  user_id, ticker, name, exchange, sector, isin, normalized_identity_key
+)
+SELECT
+  user_id,
+  ticker,
+  max(name),
+  max(exchange),
+  max(sector),
+  max(isin),
+  coalesce(max(isin), concat(max(exchange), ':', ticker))
 FROM holding_universe
 GROUP BY user_id, ticker
 ON CONFLICT (user_id, ticker) DO NOTHING;
@@ -251,27 +285,47 @@ INSERT INTO research_automation_preferences (user_id, next_daily_run_at)
 SELECT user_id, now() FROM active_users
 ON CONFLICT (user_id) DO NOTHING;
 
-WITH holding_universe AS (
+WITH holding_identity_rows AS (
   SELECT
     p.user_id,
     h.portfolio_id,
     upper(trim(h.ticker)) AS ticker,
-    md5(concat_ws('|', upper(trim(h.ticker)), h.quantity, h.average_cost, h.market_value)) AS fingerprint
+    concat_ws(
+      '|',
+      upper(trim(h.ticker)),
+      upper(trim(coalesce(h.name, ''))),
+      upper(trim(coalesce(h.exchange, ''))),
+      upper(trim(coalesce(h.sector, ''))),
+      upper(trim(coalesce(c.isin, '')))
+    ) AS identity_component
   FROM portfolio_holdings h
   JOIN portfolios p ON p.id = h.portfolio_id
+  JOIN research_companies c
+    ON c.user_id = p.user_id AND c.ticker = upper(trim(h.ticker))
   WHERE nullif(trim(h.ticker), '') IS NOT NULL AND h.quantity <> 0
-  UNION
+  UNION ALL
   SELECT
     p.user_id,
     h.portfolio_id,
     upper(trim(h.symbol)) AS ticker,
-    md5(concat_ws('|', upper(trim(h.symbol)), h.quantity, h.average_cost, h.previous_close)) AS fingerprint
+    concat_ws(
+      '|',
+      upper(trim(h.symbol)),
+      upper(trim(coalesce(h.name, ''))),
+      upper(trim(coalesce(h.exchange, ''))),
+      upper(trim(coalesce(h.sector, ''))),
+      upper(trim(coalesce(h.isin, '')))
+    ) AS identity_component
   FROM portfolio_direct_holdings h
   JOIN portfolios p ON p.id = h.portfolio_id
   WHERE nullif(trim(h.symbol), '') IS NOT NULL AND h.quantity <> 0
 ), normalized_holdings AS (
-  SELECT user_id, portfolio_id, ticker, max(fingerprint) AS fingerprint
-  FROM holding_universe
+  SELECT
+    user_id,
+    portfolio_id,
+    ticker,
+    md5(string_agg(identity_component, E'\n' ORDER BY identity_component)) AS fingerprint
+  FROM holding_identity_rows
   GROUP BY user_id, portfolio_id, ticker
 )
 INSERT INTO research_coverage_targets (

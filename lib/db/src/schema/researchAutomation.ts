@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -189,6 +190,10 @@ export const researchAutomationTriggerEventsTable = pgTable(
       table.leaseExpiresAt,
       table.priority,
     ),
+    uniqueIndex("research_automation_trigger_events_id_user_uidx").on(
+      table.id,
+      table.userId,
+    ),
     check(
       "research_automation_trigger_events_attempts_check",
       sql`${table.attempts} >= 0`,
@@ -247,6 +252,27 @@ export const researchAutomationJobsTable = pgTable(
       table.leaseExpiresAt,
       table.priority,
     ),
+    uniqueIndex("research_automation_jobs_id_user_company_uidx").on(
+      table.id,
+      table.userId,
+      table.companyId,
+    ),
+    foreignKey({
+      name: "research_automation_jobs_company_user_fk",
+      columns: [table.companyId, table.userId],
+      foreignColumns: [
+        researchCompaniesTable.id,
+        researchCompaniesTable.userId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "research_automation_jobs_trigger_user_fk",
+      columns: [table.triggerEventId, table.userId],
+      foreignColumns: [
+        researchAutomationTriggerEventsTable.id,
+        researchAutomationTriggerEventsTable.userId,
+      ],
+    }),
     check(
       "research_automation_jobs_attempts_check",
       sql`${table.attempts} >= 0 and ${table.maxAttempts} >= 1`,
@@ -312,6 +338,20 @@ export const automatedResearchSnapshotsTable = pgTable(
       table.companyId,
       table.contentHash,
     ),
+    uniqueIndex("automated_research_snapshots_id_user_company_uidx").on(
+      table.id,
+      table.userId,
+      table.companyId,
+    ),
+    foreignKey({
+      name: "automated_research_snapshots_job_user_company_fk",
+      columns: [table.jobId, table.userId, table.companyId],
+      foreignColumns: [
+        researchAutomationJobsTable.id,
+        researchAutomationJobsTable.userId,
+        researchAutomationJobsTable.companyId,
+      ],
+    }).onDelete("restrict"),
     check(
       "automated_research_snapshots_version_check",
       sql`${table.version} >= 1`,
@@ -371,6 +411,15 @@ export const automatedResearchSourcesTable = pgTable(
       table.snapshotId,
       table.citationKey,
     ),
+    foreignKey({
+      name: "automated_research_sources_snapshot_user_company_fk",
+      columns: [table.snapshotId, table.userId, table.companyId],
+      foreignColumns: [
+        automatedResearchSnapshotsTable.id,
+        automatedResearchSnapshotsTable.userId,
+        automatedResearchSnapshotsTable.companyId,
+      ],
+    }).onDelete("cascade"),
     check(
       "automated_research_sources_https_url_check",
       sql`${table.canonicalUrl} like 'https://%'`,

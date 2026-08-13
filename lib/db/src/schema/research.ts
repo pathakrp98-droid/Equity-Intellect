@@ -127,6 +127,7 @@ export const researchCompaniesTable = pgTable(
       table.userId,
       table.ticker,
     ),
+    uniqueIndex("research_companies_id_user_uidx").on(table.id, table.userId),
     index("research_companies_user_id_idx").on(table.userId),
   ],
 );
