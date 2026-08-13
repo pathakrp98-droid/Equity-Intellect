@@ -2,6 +2,7 @@ export * from "./auth";
 export * from "./app";
 export * from "./portfolio";
 export * from "./research";
+export * from "./researchAutomation";
 
 export * from "./copilot";
 export * from "./marketIntelligence";

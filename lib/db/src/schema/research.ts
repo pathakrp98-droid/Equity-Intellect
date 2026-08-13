@@ -70,6 +70,19 @@ export const researchScenarioEnum = pgEnum("research_scenario", [
   "bear",
 ]);
 
+export const researchSecurityTypeEnum = pgEnum("research_security_type", [
+  "equity",
+  "etf",
+  "mutual_fund",
+  "unlisted",
+  "unknown",
+]);
+
+export const researchIdentityStatusEnum = pgEnum("research_identity_status", [
+  "resolved",
+  "needs_identity",
+]);
+
 export const researchCompaniesTable = pgTable(
   "research_companies",
   {
@@ -79,6 +92,18 @@ export const researchCompaniesTable = pgTable(
       .references(() => usersTable.id, { onDelete: "cascade" }),
     ticker: varchar("ticker", { length: 30 }).notNull(),
     name: varchar("name", { length: 180 }).notNull(),
+    isin: varchar("isin", { length: 24 }),
+    normalizedIdentityKey: varchar("normalized_identity_key", { length: 180 }),
+    securityType: researchSecurityTypeEnum("security_type")
+      .notNull()
+      .default("unknown"),
+    identityStatus: researchIdentityStatusEnum("identity_status")
+      .notNull()
+      .default("needs_identity"),
+    identityConfidence: doublePrecision("identity_confidence")
+      .notNull()
+      .default(0),
+    automationEnabled: boolean("automation_enabled").notNull().default(true),
     exchange: varchar("exchange", { length: 20 }).notNull().default("NSE"),
     sector: varchar("sector", { length: 120 }),
     industry: varchar("industry", { length: 160 }),
