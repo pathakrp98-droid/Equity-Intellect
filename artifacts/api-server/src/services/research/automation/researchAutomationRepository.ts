@@ -4,11 +4,13 @@ import type {
   EvidenceStrength,
 } from "@workspace/research-contracts";
 import * as schema from "@workspace/db/schema";
-import { and, desc, eq, gt, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type {
+  ReconciliationCompany,
   ReconciliationRepository,
+  ReconciliationTarget,
   ReconciliationTransaction,
 } from "./researchReconciler";
 
@@ -22,6 +24,27 @@ export interface ClaimInput {
 export interface SanitizedFailure {
   code: string;
   message: string;
+}
+
+export interface JobLeaseFence {
+  userId: string;
+  jobId: number;
+  workerId: string;
+  now: Date;
+}
+
+export interface MarkJobRetryInput extends JobLeaseFence {
+  retryAt: Date;
+  failure: SanitizedFailure;
+}
+
+export interface MarkJobDeadLetterInput extends JobLeaseFence {
+  failure: SanitizedFailure;
+}
+
+export interface PublishSnapshotFence {
+  workerId: string;
+  now: Date;
 }
 
 export interface EnqueueResearchJobInput {
@@ -218,7 +241,7 @@ export function buildClaimTriggerEventsStatement(input: ClaimInput): SQL {
       from "research_automation_trigger_events"
       where "status" = 'queued'
         and "available_at" <= ${input.now}
-      order by "priority" asc, "available_at" asc, "id" asc
+      order by "priority" desc, "available_at" asc, "id" asc
       for update skip locked
       limit ${limit}
     )
@@ -245,7 +268,7 @@ export function buildClaimJobsStatement(input: ClaimInput): SQL {
       where "status" = 'queued'
         and "run_after" <= ${input.now}
         and "attempts" < "max_attempts"
-      order by "priority" asc, "run_after" asc, "id" asc
+      order by "priority" desc, "run_after" asc, "id" asc
       for update skip locked
       limit ${limit}
     )
@@ -321,6 +344,238 @@ export function buildOwnedJobStatement(userId: string, jobId: number): SQL {
     where "research_automation_jobs"."user_id" = ${userId}
       and "research_automation_jobs"."id" = ${jobId}
     limit 1
+  `;
+}
+
+export function buildIdentityAdvisoryLockStatement(input: {
+  userId: string;
+  normalizedIdentityKey: string;
+}): SQL {
+  return sql`
+    select pg_advisory_xact_lock(
+      hashtextextended(${`${input.userId}:${input.normalizedIdentityKey}`}, 0)
+    )
+  `;
+}
+
+export function buildFindExactIdentityCompanyStatement(input: {
+  userId: string;
+  normalizedIdentityKey: string;
+}): SQL {
+  return sql`
+    select *
+    from "research_companies"
+    where "user_id" = ${input.userId}
+      and "normalized_identity_key" = ${input.normalizedIdentityKey}
+    limit 1
+  `;
+}
+
+export function buildFindTickerFallbackCompanyStatement(input: {
+  userId: string;
+  ticker: string;
+}): SQL {
+  return sql`
+    select *
+    from "research_companies"
+    where "user_id" = ${input.userId}
+      and "ticker" = ${input.ticker}
+    limit 1
+  `;
+}
+
+export function buildCreateCompanyStatement(input: {
+  userId: string;
+  ticker: string;
+  name: string;
+  exchange: string;
+  sector: string | null;
+  isin: string | null;
+  normalizedIdentityKey: string;
+  securityType: string;
+  identityStatus: string;
+  identityConfidence: number;
+}): SQL {
+  return sql`
+    insert into "research_companies" (
+      "user_id", "ticker", "name", "exchange", "sector", "isin",
+      "normalized_identity_key", "security_type", "identity_status",
+      "identity_confidence", "data_source", "is_archived"
+    ) values (
+      ${input.userId}, ${input.ticker}, ${input.name}, ${input.exchange},
+      ${input.sector}, ${input.isin}, ${input.normalizedIdentityKey},
+      ${input.securityType}, ${input.identityStatus},
+      ${input.identityConfidence}, 'portfolio', false
+    )
+    on conflict ("user_id", "ticker") do nothing
+    returning *
+  `;
+}
+
+export function buildUpsertCoverageTargetStatement(input: {
+  userId: string;
+  portfolioId: number;
+  companyId: number;
+  ticker: string;
+  holdingFingerprint: string;
+  now: Date;
+}): SQL {
+  return sql`
+    insert into "research_coverage_targets" (
+      "user_id", "portfolio_id", "company_id", "ticker",
+      "holding_fingerprint", "is_active", "first_seen_at", "last_seen_at"
+    ) values (
+      ${input.userId}, ${input.portfolioId}, ${input.companyId}, ${input.ticker},
+      ${input.holdingFingerprint}, true, ${input.now}, ${input.now}
+    )
+    on conflict ("user_id", "portfolio_id", "ticker") do update
+    set "company_id" = excluded."company_id",
+        "holding_fingerprint" = excluded."holding_fingerprint",
+        "is_active" = true,
+        "last_seen_at" = excluded."last_seen_at",
+        "removed_at" = null
+    returning *
+  `;
+}
+
+export function buildMarkJobRetryStatement(input: MarkJobRetryInput): SQL {
+  const workerId = safeWorkerId(input.workerId);
+  const failure = sanitizeStoredFailure(input.failure);
+  return sql`
+    update "research_automation_jobs"
+    set "status" = 'queued',
+        "run_after" = ${input.retryAt},
+        "worker_id" = null,
+        "lease_expires_at" = null,
+        "error_code" = ${failure.code},
+        "error_message" = ${failure.message},
+        "updated_at" = ${input.now}
+    where "id" = ${input.jobId}
+      and "user_id" = ${input.userId}
+      and "status" = 'running'
+      and "worker_id" = ${workerId}
+      and "lease_expires_at" > ${input.now}
+    returning "id"
+  `;
+}
+
+export function buildMarkJobDeadLetterStatement(
+  input: MarkJobDeadLetterInput,
+): SQL {
+  const workerId = safeWorkerId(input.workerId);
+  const failure = sanitizeStoredFailure(input.failure);
+  return sql`
+    update "research_automation_jobs"
+    set "status" = 'dead_letter',
+        "completed_at" = ${input.now},
+        "worker_id" = null,
+        "lease_expires_at" = null,
+        "error_code" = ${failure.code},
+        "error_message" = ${failure.message},
+        "updated_at" = ${input.now}
+    where "id" = ${input.jobId}
+      and "user_id" = ${input.userId}
+      and "status" = 'running'
+      and "worker_id" = ${workerId}
+      and "lease_expires_at" > ${input.now}
+    returning "id"
+  `;
+}
+
+export function buildFencedJobLockStatement(
+  input: JobLeaseFence & { companyId: number },
+): SQL {
+  const workerId = safeWorkerId(input.workerId);
+  return sql`
+    select "id"
+    from "research_automation_jobs"
+    where "id" = ${input.jobId}
+      and "user_id" = ${input.userId}
+      and "company_id" = ${input.companyId}
+      and "status" = 'running'
+      and "worker_id" = ${workerId}
+      and "lease_expires_at" > ${input.now}
+    for update
+  `;
+}
+
+export function buildOwnedCompanyLockStatement(
+  userId: string,
+  companyId: number,
+): SQL {
+  return sql`
+    select "id"
+    from "research_companies"
+    where "user_id" = ${userId}
+      and "id" = ${companyId}
+    for update
+  `;
+}
+
+function buildSnapshotByJobStatement(input: {
+  userId: string;
+  companyId: number;
+  jobId: number;
+}): SQL {
+  return sql`
+    select "id"
+    from "automated_research_snapshots"
+    where "user_id" = ${input.userId}
+      and "company_id" = ${input.companyId}
+      and "job_id" = ${input.jobId}
+    limit 1
+  `;
+}
+
+function buildSnapshotByContentStatement(input: {
+  userId: string;
+  companyId: number;
+  contentHash: string;
+}): SQL {
+  return sql`
+    select "id"
+    from "automated_research_snapshots"
+    where "user_id" = ${input.userId}
+      and "company_id" = ${input.companyId}
+      and "content_hash" = ${input.contentHash}
+    limit 1
+  `;
+}
+
+function buildLatestSnapshotVersionStatement(input: {
+  userId: string;
+  companyId: number;
+}): SQL {
+  return sql`
+    select "version"
+    from "automated_research_snapshots"
+    where "user_id" = ${input.userId}
+      and "company_id" = ${input.companyId}
+    order by "version" desc
+    limit 1
+  `;
+}
+
+function buildCompleteJobStatement(
+  input: JobLeaseFence & { companyId: number },
+): SQL {
+  const workerId = safeWorkerId(input.workerId);
+  return sql`
+    update "research_automation_jobs"
+    set "status" = 'succeeded',
+        "completed_at" = ${input.now},
+        "worker_id" = null,
+        "lease_expires_at" = null,
+        "error_code" = null,
+        "error_message" = null,
+        "updated_at" = ${input.now}
+    where "id" = ${input.jobId}
+      and "user_id" = ${input.userId}
+      and "company_id" = ${input.companyId}
+      and "status" = 'running'
+      and "worker_id" = ${workerId}
+      and "lease_expires_at" > ${input.now}
+    returning "id"
   `;
 }
 
@@ -439,6 +694,51 @@ function mapSnapshotRow(
   };
 }
 
+function mapReconciliationCompanyRow(
+  row: Record<string, unknown>,
+): ReconciliationCompany {
+  return {
+    id: Number(row.id),
+    userId: String(row.userId ?? row.user_id),
+    ticker: String(row.ticker),
+    name: String(row.name),
+    exchange: String(row.exchange),
+    sector: (row.sector ?? null) as string | null,
+    isin: (row.isin ?? null) as string | null,
+    normalizedIdentityKey: (row.normalizedIdentityKey ??
+      row.normalized_identity_key ??
+      null) as string | null,
+    securityType: (row.securityType ??
+      row.security_type) as schema.ResearchCompany["securityType"],
+    identityStatus: (row.identityStatus ??
+      row.identity_status) as schema.ResearchCompany["identityStatus"],
+    identityConfidence: Number(
+      row.identityConfidence ?? row.identity_confidence,
+    ),
+    automationEnabled: Boolean(row.automationEnabled ?? row.automation_enabled),
+    isArchived: Boolean(row.isArchived ?? row.is_archived),
+  };
+}
+
+function mapReconciliationTargetRow(
+  row: Record<string, unknown>,
+): ReconciliationTarget {
+  return {
+    id: Number(row.id),
+    userId: String(row.userId ?? row.user_id),
+    portfolioId: Number(row.portfolioId ?? row.portfolio_id),
+    companyId: Number(row.companyId ?? row.company_id),
+    ticker: String(row.ticker),
+    holdingFingerprint: String(
+      row.holdingFingerprint ?? row.holding_fingerprint,
+    ),
+    isActive: Boolean(row.isActive ?? row.is_active),
+    firstSeenAt: mappedDate(row.firstSeenAt ?? row.first_seen_at),
+    lastSeenAt: mappedDate(row.lastSeenAt ?? row.last_seen_at),
+    removedAt: mappedNullableDate(row.removedAt ?? row.removed_at),
+  };
+}
+
 export class ResearchAutomationRepository implements ReconciliationRepository {
   constructor(private readonly database: AutomationDatabase) {}
 
@@ -530,65 +830,22 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
     });
   }
 
-  async markJobRetry(
-    userId: string,
-    jobId: number,
-    failure: SanitizedFailure,
-    retryAt: Date,
-  ): Promise<void> {
-    const safe = sanitizeStoredFailure(failure);
-    const [updated] = await this.database
-      .update(schema.researchAutomationJobsTable)
-      .set({
-        status: "queued",
-        runAfter: retryAt,
-        workerId: null,
-        leaseExpiresAt: null,
-        errorCode: safe.code,
-        errorMessage: safe.message,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(schema.researchAutomationJobsTable.id, jobId),
-          eq(schema.researchAutomationJobsTable.userId, userId),
-          inArray(schema.researchAutomationJobsTable.status, [
-            "running",
-            "failed",
-            "partial",
-          ]),
-        ),
-      )
-      .returning({ id: schema.researchAutomationJobsTable.id });
-    if (!updated) throw new Error("Research job was not found");
+  async markJobRetry(input: MarkJobRetryInput): Promise<void> {
+    const result = await this.database.execute(
+      buildMarkJobRetryStatement(input),
+    );
+    if (resultRows(result).length === 0) {
+      throw new Error("Research job lease is no longer owned");
+    }
   }
 
-  async markJobDeadLetter(
-    userId: string,
-    jobId: number,
-    failure: SanitizedFailure,
-  ): Promise<void> {
-    const safe = sanitizeStoredFailure(failure);
-    const now = new Date();
-    const [updated] = await this.database
-      .update(schema.researchAutomationJobsTable)
-      .set({
-        status: "dead_letter",
-        completedAt: now,
-        workerId: null,
-        leaseExpiresAt: null,
-        errorCode: safe.code,
-        errorMessage: safe.message,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.researchAutomationJobsTable.id, jobId),
-          eq(schema.researchAutomationJobsTable.userId, userId),
-        ),
-      )
-      .returning({ id: schema.researchAutomationJobsTable.id });
-    if (!updated) throw new Error("Research job was not found");
+  async markJobDeadLetter(input: MarkJobDeadLetterInput): Promise<void> {
+    const result = await this.database.execute(
+      buildMarkJobDeadLetterStatement(input),
+    );
+    if (resultRows(result).length === 0) {
+      throw new Error("Research job lease is no longer owned");
+    }
   }
 
   async getJob(
@@ -617,33 +874,74 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
     job: schema.ResearchAutomationJob,
     bundle: GeneratedResearchBundle,
     validation: SnapshotValidationResult,
+    fence: PublishSnapshotFence,
   ): Promise<number> {
     return this.database.transaction(async (tx) => {
-      const [ownedJob] = await tx
-        .select()
-        .from(schema.researchAutomationJobsTable)
-        .where(
-          and(
-            eq(schema.researchAutomationJobsTable.id, job.id),
-            eq(schema.researchAutomationJobsTable.userId, job.userId),
-            eq(schema.researchAutomationJobsTable.companyId, job.companyId),
-            eq(schema.researchAutomationJobsTable.status, "running"),
-          ),
-        )
-        .limit(1);
-      if (!ownedJob) throw new Error("Research job was not found");
+      const lease = {
+        userId: job.userId,
+        jobId: job.id,
+        companyId: job.companyId,
+        workerId: fence.workerId,
+        now: fence.now,
+      };
+      const lockedJob = resultRows<{ id: number }>(
+        await tx.execute(buildFencedJobLockStatement(lease)),
+      )[0];
+      if (!lockedJob) {
+        throw new Error("Research job lease is no longer owned");
+      }
+      const lockedCompany = resultRows<{ id: number }>(
+        await tx.execute(
+          buildOwnedCompanyLockStatement(job.userId, job.companyId),
+        ),
+      )[0];
+      if (!lockedCompany) throw new Error("Research company was not found");
 
-      const [latest] = await tx
-        .select({ version: schema.automatedResearchSnapshotsTable.version })
-        .from(schema.automatedResearchSnapshotsTable)
-        .where(
-          and(
-            eq(schema.automatedResearchSnapshotsTable.userId, job.userId),
-            eq(schema.automatedResearchSnapshotsTable.companyId, job.companyId),
-          ),
-        )
-        .orderBy(desc(schema.automatedResearchSnapshotsTable.version))
-        .limit(1);
+      const completeJob = async (): Promise<void> => {
+        const completed = resultRows<{ id: number }>(
+          await tx.execute(buildCompleteJobStatement(lease)),
+        )[0];
+        if (!completed) {
+          throw new Error("Research job lease is no longer owned");
+        }
+      };
+
+      const existingForJob = resultRows<{ id: number }>(
+        await tx.execute(
+          buildSnapshotByJobStatement({
+            userId: job.userId,
+            companyId: job.companyId,
+            jobId: job.id,
+          }),
+        ),
+      )[0];
+      if (existingForJob) {
+        await completeJob();
+        return Number(existingForJob.id);
+      }
+
+      const existingForContent = resultRows<{ id: number }>(
+        await tx.execute(
+          buildSnapshotByContentStatement({
+            userId: job.userId,
+            companyId: job.companyId,
+            contentHash: bundle.contentHash,
+          }),
+        ),
+      )[0];
+      if (existingForContent) {
+        await completeJob();
+        return Number(existingForContent.id);
+      }
+
+      const latest = resultRows<{ version: number }>(
+        await tx.execute(
+          buildLatestSnapshotVersionStatement({
+            userId: job.userId,
+            companyId: job.companyId,
+          }),
+        ),
+      )[0];
       const [snapshot] = await tx
         .insert(schema.automatedResearchSnapshotsTable)
         .values({
@@ -686,24 +984,7 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
         );
       }
 
-      await tx
-        .update(schema.researchAutomationJobsTable)
-        .set({
-          status: "succeeded",
-          completedAt: new Date(),
-          workerId: null,
-          leaseExpiresAt: null,
-          errorCode: null,
-          errorMessage: null,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.researchAutomationJobsTable.id, job.id),
-            eq(schema.researchAutomationJobsTable.userId, job.userId),
-            eq(schema.researchAutomationJobsTable.companyId, job.companyId),
-          ),
-        );
+      await completeJob();
       return snapshot.id;
     });
   }
@@ -817,51 +1098,61 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
                 ),
               ),
             ),
+        lockIdentity: async (normalizedIdentityKey) => {
+          await client.execute(
+            buildIdentityAdvisoryLockStatement({
+              userId,
+              normalizedIdentityKey,
+            }),
+          );
+        },
         findCompany: async ({ normalizedIdentityKey, ticker }) => {
-          const [company] = await client
-            .select()
-            .from(schema.researchCompaniesTable)
-            .where(
-              and(
-                eq(schema.researchCompaniesTable.userId, userId),
-                or(
-                  eq(
-                    schema.researchCompaniesTable.normalizedIdentityKey,
-                    normalizedIdentityKey,
-                  ),
-                  eq(schema.researchCompaniesTable.ticker, ticker),
-                ),
-              ),
-            )
-            .orderBy(
-              desc(
-                sql`case when ${schema.researchCompaniesTable.normalizedIdentityKey} = ${normalizedIdentityKey} then 1 else 0 end`,
-              ),
-            )
-            .limit(1);
-          return company ?? null;
+          const exact = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildFindExactIdentityCompanyStatement({
+                userId,
+                normalizedIdentityKey,
+              }),
+            ),
+          )[0];
+          if (exact) return mapReconciliationCompanyRow(exact);
+          const tickerFallback = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildFindTickerFallbackCompanyStatement({ userId, ticker }),
+            ),
+          )[0];
+          return tickerFallback
+            ? mapReconciliationCompanyRow(tickerFallback)
+            : null;
         },
         createCompany: async (input) => {
-          const [company] = await client
-            .insert(schema.researchCompaniesTable)
-            .values({
-              userId,
-              ticker: input.ticker,
-              name: input.name,
-              exchange: input.exchange,
-              sector: input.sector,
-              isin: input.isin,
-              normalizedIdentityKey: input.normalizedIdentityKey,
-              securityType: input.securityType,
-              identityStatus: input.identityStatus,
-              identityConfidence: input.identityConfidence,
-              dataSource: "portfolio",
-              isArchived: false,
-            })
-            .returning();
-          if (!company)
+          const company = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildCreateCompanyStatement({ userId, ...input }),
+            ),
+          )[0];
+          if (company) return mapReconciliationCompanyRow(company);
+          const exact = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildFindExactIdentityCompanyStatement({
+                userId,
+                normalizedIdentityKey: input.normalizedIdentityKey,
+              }),
+            ),
+          )[0];
+          if (exact) return mapReconciliationCompanyRow(exact);
+          const existing = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildFindTickerFallbackCompanyStatement({
+                userId,
+                ticker: input.ticker,
+              }),
+            ),
+          )[0];
+          if (!existing) {
             throw new Error("Research company could not be created");
-          return company;
+          }
+          return mapReconciliationCompanyRow(existing);
         },
         updateCompanyAutomation: async (companyId, input) => {
           const [company] = await client
@@ -878,20 +1169,17 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
           return company;
         },
         createTarget: async (input) => {
-          const [target] = await client
-            .insert(schema.researchCoverageTargetsTable)
-            .values({
-              userId,
-              portfolioId,
-              companyId: input.companyId,
-              ticker: input.ticker,
-              holdingFingerprint: input.holdingFingerprint,
-              firstSeenAt: input.now,
-              lastSeenAt: input.now,
-            })
-            .returning();
+          const target = resultRows<Record<string, unknown>>(
+            await client.execute(
+              buildUpsertCoverageTargetStatement({
+                userId,
+                portfolioId,
+                ...input,
+              }),
+            ),
+          )[0];
           if (!target) throw new Error("Research target could not be created");
-          return target;
+          return mapReconciliationTargetRow(target);
         },
         updateTarget: async (targetId, input) => {
           const [target] = await client

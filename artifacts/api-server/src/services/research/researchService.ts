@@ -173,6 +173,57 @@ function normalizeTicker(value: string): string {
   return ticker;
 }
 
+export function buildResearchHoldingCoverageMap<
+  Holding extends { ticker: string; marketValue: number },
+>(
+  companies: Array<{ id: number; ticker: string }>,
+  targets: Array<{ companyId: number; ticker: string; isActive: boolean }>,
+  holdings: Holding[],
+): {
+  holdingByCompanyId: Map<number, Holding>;
+  coveredHoldingTickers: Set<string>;
+  holdingByTicker: Map<string, Holding>;
+} {
+  const holdingByTicker = new Map<string, Holding>();
+  for (const holding of holdings) {
+    const ticker = normalizeTicker(holding.ticker);
+    const existing = holdingByTicker.get(ticker);
+    if (!existing || holding.marketValue > existing.marketValue) {
+      holdingByTicker.set(ticker, holding);
+    }
+  }
+
+  const activeTargetTickersByCompany = new Map<number, Set<string>>();
+  for (const target of targets) {
+    if (!target.isActive) continue;
+    const tickers =
+      activeTargetTickersByCompany.get(target.companyId) ?? new Set();
+    tickers.add(normalizeTicker(target.ticker));
+    activeTargetTickersByCompany.set(target.companyId, tickers);
+  }
+
+  const holdingByCompanyId = new Map<number, Holding>();
+  const coveredHoldingTickers = new Set<string>();
+  for (const company of companies) {
+    const candidateTickers = new Set(
+      activeTargetTickersByCompany.get(company.id) ?? [],
+    );
+    candidateTickers.add(normalizeTicker(company.ticker));
+    let selected: Holding | undefined;
+    for (const ticker of candidateTickers) {
+      const holding = holdingByTicker.get(ticker);
+      if (!holding) continue;
+      coveredHoldingTickers.add(ticker);
+      if (!selected || holding.marketValue > selected.marketValue) {
+        selected = holding;
+      }
+    }
+    if (selected) holdingByCompanyId.set(company.id, selected);
+  }
+
+  return { holdingByCompanyId, coveredHoldingTickers, holdingByTicker };
+}
+
 function cleanText(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
   const cleaned = value.trim();
@@ -400,6 +451,7 @@ class ResearchService {
             db
               .select({
                 companyId: researchCoverageTargetsTable.companyId,
+                ticker: researchCoverageTargetsTable.ticker,
                 isActive: researchCoverageTargetsTable.isActive,
               })
               .from(researchCoverageTargetsTable)
@@ -495,16 +547,11 @@ class ResearchService {
       }
     }
 
-    const holdingByTicker = new Map<string, (typeof holdings)[number]>();
-    for (const holding of holdings) {
-      const existing = holdingByTicker.get(holding.ticker);
-      if (!existing || holding.marketValue > existing.marketValue) {
-        holdingByTicker.set(holding.ticker, holding);
-      }
-    }
+    const { holdingByCompanyId, coveredHoldingTickers, holdingByTicker } =
+      buildResearchHoldingCoverageMap(covered, automationTargets, holdings);
 
     const rows: ResearchCompanyListRow[] = covered.map((company) => {
-      const holding = holdingByTicker.get(company.ticker) ?? null;
+      const holding = holdingByCompanyId.get(company.id) ?? null;
       const thesis = thesisByCompany.get(company.id) ?? null;
       const completeness = calculateResearchCompleteness({
         company,
@@ -556,8 +603,7 @@ class ResearchService {
     });
 
     for (const holding of holdingByTicker.values()) {
-      if (covered.some((company) => company.ticker === holding.ticker))
-        continue;
+      if (coveredHoldingTickers.has(normalizeTicker(holding.ticker))) continue;
       rows.push({
         id: null,
         ticker: holding.ticker,

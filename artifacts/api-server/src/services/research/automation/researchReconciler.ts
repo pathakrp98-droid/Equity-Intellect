@@ -70,6 +70,7 @@ export interface ReconciliationJob {
 export interface ReconciliationTransaction {
   listHoldings(): Promise<ReconciliationHolding[]>;
   listTargets(): Promise<ReconciliationTarget[]>;
+  lockIdentity(normalizedIdentityKey: string): Promise<void>;
   findCompany(input: {
     normalizedIdentityKey: string;
     ticker: string;
@@ -283,6 +284,7 @@ export async function reconcilePortfolioHoldings(
       seenTickers.add(ticker);
       const holding = { ...rawHolding, ticker };
       const classified = classificationFor(holding);
+      await tx.lockIdentity(classified.normalizedIdentityKey);
       let company = await tx.findCompany({
         normalizedIdentityKey: classified.normalizedIdentityKey,
         ticker,
@@ -302,27 +304,64 @@ export async function reconcilePortfolioHoldings(
           ...classified,
         });
         result.companiesCreated += 1;
+        const createConflictHasDifferentIsin =
+          Boolean(company.isin) &&
+          Boolean(classified.isin) &&
+          company.isin !== classified.isin;
+        if (createConflictHasDifferentIsin) {
+          company = await tx.updateCompanyAutomation(company.id, {
+            identityStatus: "needs_identity",
+            identityConfidence: 0,
+          });
+        } else if (
+          classified.isin &&
+          company.normalizedIdentityKey?.startsWith("security:")
+        ) {
+          company = await tx.updateCompanyAutomation(company.id, {
+            isin: company.isin ?? classified.isin,
+            normalizedIdentityKey: classified.normalizedIdentityKey,
+            securityType: classified.securityType,
+            identityStatus: classified.identityStatus,
+            identityConfidence: classified.identityConfidence,
+          });
+        }
       } else {
+        const matchedExactIdentity =
+          company.normalizedIdentityKey === classified.normalizedIdentityKey;
+        const conflictingStableIsin =
+          Boolean(classified.isin) &&
+          Boolean(company.isin) &&
+          company.isin !== classified.isin &&
+          !matchedExactIdentity;
+        const canUpgradeTickerIdentity =
+          Boolean(classified.isin) &&
+          company.normalizedIdentityKey?.startsWith("security:") === true;
         const preserveResolvedIdentity =
           company.identityStatus === "resolved" &&
           Boolean(company.normalizedIdentityKey) &&
           classified.identityStatus === "needs_identity";
         company = await tx.updateCompanyAutomation(company.id, {
-          ...(company.isin
+          ...(conflictingStableIsin || company.isin
             ? {}
             : classified.isin
               ? { isin: classified.isin }
               : {}),
-          ...(company.normalizedIdentityKey
+          ...(conflictingStableIsin
             ? {}
-            : { normalizedIdentityKey: classified.normalizedIdentityKey }),
-          ...(preserveResolvedIdentity
-            ? {}
-            : {
-                securityType: classified.securityType,
-                identityStatus: classified.identityStatus,
-                identityConfidence: classified.identityConfidence,
-              }),
+            : canUpgradeTickerIdentity
+              ? { normalizedIdentityKey: classified.normalizedIdentityKey }
+              : company.normalizedIdentityKey
+                ? {}
+                : { normalizedIdentityKey: classified.normalizedIdentityKey }),
+          ...(conflictingStableIsin
+            ? { identityStatus: "needs_identity", identityConfidence: 0 }
+            : preserveResolvedIdentity
+              ? {}
+              : {
+                  securityType: classified.securityType,
+                  identityStatus: classified.identityStatus,
+                  identityConfidence: classified.identityConfidence,
+                }),
         });
       }
 

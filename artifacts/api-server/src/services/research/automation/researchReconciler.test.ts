@@ -3,6 +3,12 @@ import { describe, test } from "node:test";
 
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
+import {
+  automatedResearchSnapshotsTable,
+  automatedResearchSourcesTable,
+} from "@workspace/db/schema";
+
+import * as automationRepositoryModule from "./researchAutomationRepository";
 
 import {
   buildClaimJobsStatement,
@@ -51,6 +57,7 @@ class MemoryRepository implements ReconciliationRepository {
     invalidations: ["owner invalidation"],
     assumptions: ["owner assumption"],
   };
+  reconciliationOperations: string[] = [];
 
   private nextCompanyId = 1;
   private nextTargetId = 1;
@@ -75,19 +82,31 @@ class MemoryRepository implements ReconciliationRepository {
     }
 
     const tx: ReconciliationTransaction = {
+      lockIdentity: async (normalizedIdentityKey: string) => {
+        this.reconciliationOperations.push(`lock:${normalizedIdentityKey}`);
+      },
       listHoldings: async () => [...(this.holdings.get(portfolioId) ?? [])],
       listTargets: async () =>
         this.targets.filter(
           (target) =>
             target.userId === userId && target.portfolioId === portfolioId,
         ),
-      findCompany: async ({ normalizedIdentityKey, ticker }) =>
-        this.companies.find(
+      findCompany: async ({ normalizedIdentityKey, ticker }) => {
+        this.reconciliationOperations.push(
+          `find:${normalizedIdentityKey}:${ticker}`,
+        );
+        const exact = this.companies.find(
           (company) =>
             company.userId === userId &&
-            (company.normalizedIdentityKey === normalizedIdentityKey ||
-              company.ticker === ticker),
-        ) ?? null,
+            company.normalizedIdentityKey === normalizedIdentityKey,
+        );
+        if (exact) return exact;
+        return (
+          this.companies.find(
+            (company) => company.userId === userId && company.ticker === ticker,
+          ) ?? null
+        );
+      },
       createCompany: async (input) => {
         const company: StoredCompany = {
           id: this.nextCompanyId++,
@@ -508,9 +527,162 @@ test("reconcile: automated updates preserve non-null manual company profile fiel
   assert.equal(company.isArchived, false);
 });
 
+test("reconcile review: conflicting stable ISIN preserves old research and requires identity review", async () => {
+  const repository = new MemoryRepository();
+  repository.companies.push({
+    id: 7,
+    userId: "user-a",
+    ticker: "RELIANCE",
+    name: "Owner supplied name",
+    exchange: "NSE",
+    sector: "Owner sector",
+    isin: "INE002A01018",
+    normalizedIdentityKey: "isin:INE002A01018",
+    securityType: "equity",
+    identityStatus: "resolved",
+    identityConfidence: 1,
+    automationEnabled: true,
+    isArchived: false,
+    description: "Owner description",
+    website: "https://owner.example",
+  });
+  repository.addPortfolio("user-a", 10, [holding({ isin: "INE999A01019" })]);
+  const manualBefore = structuredClone(repository.manual);
+
+  const result = await reconcilePortfolioHoldings(repository, {
+    userId: "user-a",
+    portfolioId: 10,
+    now: firstRunAt,
+  });
+
+  const company = repository.companies[0]!;
+  assert.equal(company.isin, "INE002A01018");
+  assert.equal(company.normalizedIdentityKey, "isin:INE002A01018");
+  assert.equal(company.identityStatus, "needs_identity");
+  assert.deepEqual(result.needsIdentity, ["RELIANCE"]);
+  assert.equal(repository.jobs.length, 0);
+  assert.deepEqual(repository.manual, manualBefore);
+});
+
+test("reconcile review: exact identity outranks a conflicting ticker fallback", async () => {
+  const repository = new MemoryRepository();
+  repository.companies.push(
+    {
+      id: 7,
+      userId: "user-a",
+      ticker: "RELIANCE",
+      name: "Old ticker owner",
+      exchange: "NSE",
+      sector: null,
+      isin: "INE999A01019",
+      normalizedIdentityKey: "isin:INE999A01019",
+      securityType: "equity",
+      identityStatus: "resolved",
+      identityConfidence: 1,
+      automationEnabled: true,
+      isArchived: false,
+      description: "Preserve old manual research",
+      website: null,
+    },
+    {
+      id: 8,
+      userId: "user-a",
+      ticker: "OLDALIAS",
+      name: "Exact ISIN owner",
+      exchange: "NSE",
+      sector: null,
+      isin: "INE002A01018",
+      normalizedIdentityKey: "isin:INE002A01018",
+      securityType: "equity",
+      identityStatus: "resolved",
+      identityConfidence: 1,
+      automationEnabled: true,
+      isArchived: false,
+      description: "Reuse this research",
+      website: null,
+    },
+  );
+  repository.addPortfolio("user-a", 10, [holding()]);
+
+  await reconcilePortfolioHoldings(repository, {
+    userId: "user-a",
+    portfolioId: 10,
+    now: firstRunAt,
+  });
+
+  assert.equal(repository.targets[0]?.companyId, 8);
+  assert.equal(repository.companies[0]?.identityStatus, "resolved");
+  assert.equal(repository.companies[0]?.isin, "INE999A01019");
+});
+
+test("reconcile review: newly discovered ISIN upgrades a ticker-derived identity and job key", async () => {
+  const repository = new MemoryRepository();
+  repository.companies.push({
+    id: 7,
+    userId: "user-a",
+    ticker: "RELIANCE",
+    name: "Owner supplied name",
+    exchange: "NSE",
+    sector: "Owner sector",
+    isin: null,
+    normalizedIdentityKey: "security:NSE:RELIANCE",
+    securityType: "equity",
+    identityStatus: "resolved",
+    identityConfidence: 0.75,
+    automationEnabled: true,
+    isArchived: false,
+    description: "Owner description",
+    website: "https://owner.example",
+  });
+  repository.addPortfolio("user-a", 10, [holding()]);
+
+  await reconcilePortfolioHoldings(repository, {
+    userId: "user-a",
+    portfolioId: 10,
+    now: firstRunAt,
+  });
+
+  assert.equal(repository.companies[0]?.isin, "INE002A01018");
+  assert.equal(
+    repository.companies[0]?.normalizedIdentityKey,
+    "isin:INE002A01018",
+  );
+  assert.match(
+    repository.jobs[0]?.idempotencyKey ?? "",
+    /^user-a:isin:INE002A01018:/,
+  );
+});
+
+test("reconcile review: identity advisory lock is acquired before company lookup", async () => {
+  const repository = new MemoryRepository();
+  repository.addPortfolio("user-a", 10, [holding()]);
+
+  await reconcilePortfolioHoldings(repository, {
+    userId: "user-a",
+    portfolioId: 10,
+    now: firstRunAt,
+  });
+
+  assert.deepEqual(repository.reconciliationOperations.slice(0, 2), [
+    "lock:isin:INE002A01018",
+    "find:isin:INE002A01018:RELIANCE",
+  ]);
+});
+
 function compiled(statement: SQL): { sql: string; params: unknown[] } {
   const query = new PgDialect().sqlToQuery(statement);
   return { sql: query.sql.replace(/\s+/g, " ").trim(), params: query.params };
+}
+
+function requiredSqlBuilder(
+  name: string,
+  ...args: unknown[]
+): { sql: string; params: unknown[] } {
+  const candidate = (
+    automationRepositoryModule as unknown as Record<string, unknown>
+  )[name];
+  assert.equal(typeof candidate, "function", `${name} must be exported`);
+  return compiled((candidate as (...values: unknown[]) => SQL)(...args));
 }
 
 test("repository: trigger and job claims use one atomic skip-locked CTE", () => {
@@ -527,6 +699,7 @@ test("repository: trigger and job claims use one atomic skip-locked CTE", () => 
     const query = compiled(statement);
     assert.match(query.sql, /^with "candidates" as \(/i);
     assert.match(query.sql, /for update skip locked/i);
+    assert.match(query.sql, /order by "priority" desc/i);
     assert.match(query.sql, /update .* from "candidates"/i);
     assert.match(query.sql, /returning/i);
     assert.match(query.sql, /"attempts" = .*"attempts" \+ 1/i);
@@ -536,6 +709,68 @@ test("repository: trigger and job claims use one atomic skip-locked CTE", () => 
       1,
     );
   }
+});
+
+test("repository review: identity lookup and reconciliation writes are race-safe SQL", () => {
+  const lock = requiredSqlBuilder("buildIdentityAdvisoryLockStatement", {
+    userId: "user-a",
+    normalizedIdentityKey: "isin:INE002A01018",
+  });
+  assert.match(lock.sql, /pg_advisory_xact_lock/i);
+  assert.match(lock.sql, /hashtextextended/i);
+  assert.ok(lock.params.includes("user-a:isin:INE002A01018"));
+
+  const exact = requiredSqlBuilder("buildFindExactIdentityCompanyStatement", {
+    userId: "user-a",
+    normalizedIdentityKey: "isin:INE002A01018",
+  });
+  assert.match(exact.sql, /"normalized_identity_key" =/i);
+  assert.doesNotMatch(exact.sql, /\sor\s/i);
+
+  const fallback = requiredSqlBuilder(
+    "buildFindTickerFallbackCompanyStatement",
+    {
+      userId: "user-a",
+      ticker: "RELIANCE",
+    },
+  );
+  assert.match(fallback.sql, /"ticker" =/i);
+
+  const companyInsert = requiredSqlBuilder("buildCreateCompanyStatement", {
+    userId: "user-a",
+    ticker: "RELIANCE",
+    name: "Reliance Industries Limited",
+    exchange: "NSE",
+    sector: "Energy",
+    isin: "INE002A01018",
+    normalizedIdentityKey: "isin:INE002A01018",
+    securityType: "equity",
+    identityStatus: "resolved",
+    identityConfidence: 1,
+  });
+  assert.match(
+    companyInsert.sql,
+    /on conflict \("user_id", "ticker"\) do nothing/i,
+  );
+  assert.match(companyInsert.sql, /returning \*/i);
+
+  const targetUpsert = requiredSqlBuilder(
+    "buildUpsertCoverageTargetStatement",
+    {
+      userId: "user-a",
+      portfolioId: 10,
+      companyId: 7,
+      ticker: "RELIANCE",
+      holdingFingerprint: "f".repeat(64),
+      now: firstRunAt,
+    },
+  );
+  assert.match(
+    targetUpsert.sql,
+    /on conflict \("user_id", "portfolio_id", "ticker"\) do update/i,
+  );
+  assert.match(targetUpsert.sql, /"is_active" = true/i);
+  assert.match(targetUpsert.sql, /"removed_at" = null/i);
 });
 
 test("repository: expired job recovery does not increment attempts and dead-letters exhausted jobs", () => {
@@ -611,6 +846,238 @@ test("repository: stored failures are bounded and control characters are removed
   assert.equal(failure.message.includes("\n"), false);
   assert.equal(failure.message.includes("\u0000"), false);
   assert.equal(failure.message.length, 1000);
+});
+
+test("repository review: retry, dead-letter, and publish SQL require the active lease owner", () => {
+  const fence = {
+    userId: "user-a",
+    jobId: 9,
+    companyId: 7,
+    workerId: "worker-a",
+    now: firstRunAt,
+  };
+  const retry = requiredSqlBuilder("buildMarkJobRetryStatement", {
+    ...fence,
+    retryAt: new Date("2026-08-14T06:30:00.000Z"),
+    failure: { code: "provider_timeout", message: "Timed out." },
+  });
+  const deadLetter = requiredSqlBuilder("buildMarkJobDeadLetterStatement", {
+    ...fence,
+    failure: { code: "provider_timeout", message: "Timed out." },
+  });
+  for (const query of [retry, deadLetter]) {
+    assert.match(query.sql, /"user_id" =/i);
+    assert.match(query.sql, /"status" = .*running/i);
+    assert.match(query.sql, /"worker_id" =/i);
+    assert.match(query.sql, /"lease_expires_at" >/i);
+    assert.ok(query.params.includes("user-a"));
+    assert.ok(query.params.includes("worker-a"));
+  }
+
+  const jobLock = requiredSqlBuilder("buildFencedJobLockStatement", fence);
+  assert.match(jobLock.sql, /for update/i);
+  assert.match(jobLock.sql, /"status" = .*running/i);
+  assert.match(jobLock.sql, /"worker_id" =/i);
+  assert.match(jobLock.sql, /"lease_expires_at" >/i);
+
+  const companyLock = requiredSqlBuilder(
+    "buildOwnedCompanyLockStatement",
+    "user-a",
+    7,
+  );
+  assert.match(companyLock.sql, /from "research_companies"/i);
+  assert.match(companyLock.sql, /for update/i);
+  assert.ok(companyLock.params.includes("user-a"));
+});
+
+test("repository review: stale worker cannot dead-letter a reclaimed job", async () => {
+  const database = {
+    execute: async () => ({ rows: [] }),
+  };
+  const repository = new ResearchAutomationRepository(database as never);
+
+  await assert.rejects(
+    repository.markJobDeadLetter({
+      userId: "user-a",
+      jobId: 9,
+      workerId: "stale-worker",
+      now: firstRunAt,
+      failure: { code: "provider_timeout", message: "Timed out." },
+    } as never),
+    /lease is no longer owned/i,
+  );
+});
+
+function publicationFixture() {
+  return {
+    job: {
+      id: 9,
+      userId: "user-a",
+      companyId: 7,
+      status: "running",
+      workerId: "worker-a",
+      leaseExpiresAt: new Date("2026-08-14T06:10:00.000Z"),
+    } as never,
+    bundle: {
+      payload: { securityType: "equity" } as never,
+      schemaVersion: "1",
+      templateVersion: "equity-v1",
+      quality: {},
+      changeSet: {},
+      freshAt: firstRunAt,
+      validUntil: new Date("2026-08-15T06:00:00.000Z"),
+      provider: "test",
+      model: "test-model",
+      contentHash: "a".repeat(64),
+      sources: [],
+    },
+    validation: { evidenceStrength: "moderate" as const },
+    fence: { workerId: "worker-a", now: firstRunAt },
+  };
+}
+
+function publicationDatabase(input: {
+  existingJobSnapshotId?: number;
+  existingContentSnapshotId?: number;
+}) {
+  const operations: string[] = [];
+  let insertedSnapshot: Record<string, unknown> | null = null;
+
+  const tx = {
+    execute: async (statement: SQL) => {
+      const query = compiled(statement).sql;
+      if (
+        /from "research_automation_jobs"/i.test(query) &&
+        /for update/i.test(query)
+      ) {
+        operations.push("lock-job");
+        return { rows: [{ id: 9 }] };
+      }
+      if (
+        /from "research_companies"/i.test(query) &&
+        /for update/i.test(query)
+      ) {
+        operations.push("lock-company");
+        return { rows: [{ id: 7 }] };
+      }
+      if (/"job_id" =/i.test(query)) {
+        operations.push("find-job-snapshot");
+        return {
+          rows: input.existingJobSnapshotId
+            ? [{ id: input.existingJobSnapshotId }]
+            : [],
+        };
+      }
+      if (/"content_hash" =/i.test(query)) {
+        operations.push("find-content-snapshot");
+        return {
+          rows: input.existingContentSnapshotId
+            ? [{ id: input.existingContentSnapshotId }]
+            : [],
+        };
+      }
+      if (/order by "version" desc/i.test(query)) {
+        operations.push("read-latest-version");
+        return { rows: [{ version: 3 }] };
+      }
+      if (/update "research_automation_jobs"/i.test(query)) {
+        operations.push("complete-job");
+        return { rows: [{ id: 9 }] };
+      }
+      throw new Error(`Unexpected publication SQL: ${query}`);
+    },
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => {
+        if (table === automatedResearchSnapshotsTable) {
+          operations.push("insert-snapshot");
+          insertedSnapshot = values;
+          return { returning: async () => [{ id: 77 }] };
+        }
+        if (table === automatedResearchSourcesTable) {
+          operations.push("insert-sources");
+          return Promise.resolve();
+        }
+        throw new Error("Unexpected publication table");
+      },
+    }),
+  };
+  return {
+    database: {
+      transaction: async <T>(
+        operation: (transaction: typeof tx) => Promise<T>,
+      ) => operation(tx),
+    },
+    operations,
+    insertedSnapshot: () => insertedSnapshot,
+  };
+}
+
+test("repository review: publish locks job then company before version allocation", async () => {
+  const fake = publicationDatabase({});
+  const repository = new ResearchAutomationRepository(fake.database as never);
+  const fixture = publicationFixture();
+
+  const snapshotId = await repository.publishSnapshot(
+    fixture.job,
+    fixture.bundle,
+    fixture.validation,
+    fixture.fence,
+  );
+
+  assert.equal(snapshotId, 77);
+  assert.deepEqual(fake.operations, [
+    "lock-job",
+    "lock-company",
+    "find-job-snapshot",
+    "find-content-snapshot",
+    "read-latest-version",
+    "insert-snapshot",
+    "complete-job",
+  ]);
+  assert.equal(fake.insertedSnapshot()?.version, 4);
+});
+
+test("repository review: duplicate job publication completes without a second snapshot", async () => {
+  const fake = publicationDatabase({ existingJobSnapshotId: 41 });
+  const repository = new ResearchAutomationRepository(fake.database as never);
+  const fixture = publicationFixture();
+
+  const snapshotId = await repository.publishSnapshot(
+    fixture.job,
+    fixture.bundle,
+    fixture.validation,
+    fixture.fence,
+  );
+
+  assert.equal(snapshotId, 41);
+  assert.deepEqual(fake.operations, [
+    "lock-job",
+    "lock-company",
+    "find-job-snapshot",
+    "complete-job",
+  ]);
+});
+
+test("repository review: duplicate content completes without corrupting version history", async () => {
+  const fake = publicationDatabase({ existingContentSnapshotId: 44 });
+  const repository = new ResearchAutomationRepository(fake.database as never);
+  const fixture = publicationFixture();
+
+  const snapshotId = await repository.publishSnapshot(
+    fixture.job,
+    fixture.bundle,
+    fixture.validation,
+    fixture.fence,
+  );
+
+  assert.equal(snapshotId, 44);
+  assert.deepEqual(fake.operations, [
+    "lock-job",
+    "lock-company",
+    "find-job-snapshot",
+    "find-content-snapshot",
+    "complete-job",
+  ]);
 });
 
 test("repository: refresh buckets follow holding, local-day, four-hour, and fifteen-minute policies", () => {
@@ -700,5 +1167,57 @@ test("research list: inactive portfolio membership is archived without changing 
       now: new Date("2026-08-15T06:00:00.000Z"),
     }),
     "archived",
+  );
+});
+
+test("research list review: active target aliases bind live holdings without an uncovered duplicate", async () => {
+  process.env.DATABASE_URL = "postgresql://test-only.invalid/no-connection";
+  const researchServiceModule = await import("../researchService");
+  const buildMap = (researchServiceModule as unknown as Record<string, unknown>)
+    .buildResearchHoldingCoverageMap;
+  assert.equal(
+    typeof buildMap,
+    "function",
+    "buildResearchHoldingCoverageMap must be exported",
+  );
+  const aliasedHolding = {
+    ticker: "NEWALIAS",
+    name: "Issuer New Alias",
+    exchange: "NSE",
+    sector: "Industrials",
+    quantity: 4,
+    marketPrice: 345.5,
+    previousClose: 340,
+    marketValue: 1382,
+    allocationPct: 12,
+  };
+
+  const result = (
+    buildMap as (
+      companies: Array<{ id: number; ticker: string }>,
+      targets: Array<{
+        companyId: number;
+        ticker: string;
+        isActive: boolean;
+      }>,
+      holdings: (typeof aliasedHolding)[],
+    ) => {
+      holdingByCompanyId: Map<number, typeof aliasedHolding>;
+      coveredHoldingTickers: Set<string>;
+    }
+  )(
+    [{ id: 7, ticker: "OLDALIAS" }],
+    [{ companyId: 7, ticker: "NEWALIAS", isActive: true }],
+    [aliasedHolding],
+  );
+
+  assert.equal(result.holdingByCompanyId.get(7)?.ticker, "NEWALIAS");
+  assert.equal(result.holdingByCompanyId.get(7)?.marketPrice, 345.5);
+  assert.equal(result.coveredHoldingTickers.has("NEWALIAS"), true);
+  assert.deepEqual(
+    [aliasedHolding]
+      .filter((holding) => !result.coveredHoldingTickers.has(holding.ticker))
+      .map((holding) => holding.ticker),
+    [],
   );
 });
