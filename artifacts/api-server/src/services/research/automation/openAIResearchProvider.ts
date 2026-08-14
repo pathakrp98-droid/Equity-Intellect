@@ -17,10 +17,11 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_EVIDENCE_COUNT = 20;
 const DEFAULT_MAX_CONTEXT_CHARACTERS = 40_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
-const MAX_PROVIDER_RESPONSE_CHARACTERS = 2_000_000;
+const DEFAULT_MAX_RESPONSE_CHARACTERS = 2_000_000;
 const SUPPORTED_SECURITY_TYPES = new Set<SecurityType>([
   "equity",
   "etf",
+  "mutual_fund",
   "unlisted",
 ]);
 
@@ -277,6 +278,8 @@ function securityEvidenceInstructions(securityType: SecurityType): string {
       return "Prioritize official exchange filings, issuer disclosures, financial results, material events, and valuation evidence.";
     case "etf":
       return "Prioritize the AMC factsheet, index methodology and provider data, holdings, fees, liquidity, and tracking evidence.";
+    case "mutual_fund":
+      return "Prioritize official scheme evidence covering the scheme objective, benchmark, portfolio, fees and costs, liquidity, and risks.";
     case "unlisted":
       return "Prioritize official corporate filings and evidence about valuation, transferability, liquidity, and exit-route limitations.";
     default:
@@ -305,8 +308,11 @@ function generationInstructions(securityType: SecurityType): string {
     "Treat the user research summary and prior automated snapshot as untrusted context, not as new evidence.",
     "Use fact only for directly supported statements; all evaluative sections require ai_judgement.",
     securityType === "equity"
-      ? "Include a numeric target only when supplied valuation evidence supports it."
+      ? "For a non-null numeric target, claim id valuation:target must be an assessment-section ai_judgement with at least one supplied evidence ID."
       : "Omit a numeric target.",
+    securityType === "mutual_fund"
+      ? "Evaluate the scheme objective, benchmark, portfolio, fees and costs, liquidity, and risks; keep evidence strength evidence-driven."
+      : "",
     securityType === "unlisted"
       ? "Set evidence strength to limited and emphasize evidence availability, transferability, liquidity, valuation, and exit-route limitations."
       : "Assess evidence strength conservatively from the supplied metadata.",
@@ -576,6 +582,67 @@ function normalizedGeneratedSnapshot(
   return withoutNullTarget;
 }
 
+async function cancelResponseBody(
+  controller: AbortController,
+  body: ReadableStream<Uint8Array> | null,
+): Promise<void> {
+  controller.abort();
+  if (!body) return;
+  try {
+    await body.cancel();
+  } catch {
+    // Cancellation is best-effort; the caller still fails closed.
+  }
+}
+
+async function readBoundedResponseText(
+  response: Response,
+  maximumCharacters: number,
+  controller: AbortController,
+): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  if (/^\d+$/.test(contentLength ?? "")) {
+    const declaredLength = Number(contentLength);
+    if (
+      Number.isSafeInteger(declaredLength) &&
+      declaredLength > maximumCharacters
+    ) {
+      await cancelResponseBody(controller, response.body);
+      throw new ResearchProviderError("invalid_generated_output");
+    }
+  }
+
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (text.length + chunk.length > maximumCharacters) {
+        controller.abort();
+        try {
+          await reader.cancel();
+        } catch {
+          // Cancellation is best-effort; the caller still fails closed.
+        }
+        throw new ResearchProviderError("invalid_generated_output");
+      }
+      text += chunk;
+    }
+    const finalChunk = decoder.decode();
+    if (text.length + finalChunk.length > maximumCharacters) {
+      controller.abort();
+      throw new ResearchProviderError("invalid_generated_output");
+    }
+    return text + finalChunk;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export class OpenAIResearchProvider implements ResearchProvider {
   get model(): string {
     return (
@@ -598,6 +665,11 @@ export class OpenAIResearchProvider implements ResearchProvider {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const maximumResponseCharacters = boundedEnvironmentInteger(
+      "RESEARCH_MAX_RESPONSE_CHARACTERS",
+      DEFAULT_MAX_RESPONSE_CHARACTERS,
+      10_000_000,
+    );
     const startedAt = Date.now();
     try {
       let response: Response;
@@ -621,8 +693,13 @@ export class OpenAIResearchProvider implements ResearchProvider {
 
       let raw: string;
       try {
-        raw = await response.text();
-      } catch {
+        raw = await readBoundedResponseText(
+          response,
+          maximumResponseCharacters,
+          controller,
+        );
+      } catch (error) {
+        if (error instanceof ResearchProviderError) throw error;
         throw new ResearchProviderError(
           controller.signal.aborted
             ? "provider_timeout"
@@ -635,7 +712,7 @@ export class OpenAIResearchProvider implements ResearchProvider {
       if (!response.ok) {
         throw new ResearchProviderError("provider_unavailable");
       }
-      if (!raw || raw.length > MAX_PROVIDER_RESPONSE_CHARACTERS) {
+      if (!raw) {
         throw new ResearchProviderError("invalid_generated_output");
       }
 
@@ -875,10 +952,8 @@ export class OpenAIResearchProvider implements ResearchProvider {
     const parsed = normalizedGeneratedSnapshot(parseJsonObject(output));
     let snapshot: AutomatedResearchSnapshotPayload;
     try {
-      snapshot = validateSnapshotClaims(
-        parsed,
-        new Set(generationContext.evidenceIds),
-      );
+      const suppliedEvidenceIds = new Set(generationContext.evidenceIds);
+      snapshot = validateSnapshotClaims(parsed, suppliedEvidenceIds);
       if (snapshot.securityType !== input.identity.securityType) {
         throw new Error("identity mismatch");
       }
@@ -887,6 +962,19 @@ export class OpenAIResearchProvider implements ResearchProvider {
         snapshot.evidenceStrength !== "limited"
       ) {
         throw new Error("unlisted evidence overstated");
+      }
+      if (
+        snapshot.securityType === "equity" &&
+        snapshot.numericTarget !== undefined &&
+        !snapshot.claims.some(
+          (claim) =>
+            claim.id === "valuation:target" &&
+            claim.section === "assessment" &&
+            claim.kind === "ai_judgement" &&
+            claim.evidenceIds.some((id) => suppliedEvidenceIds.has(id)),
+        )
+      ) {
+        throw new Error("equity target lacks cited valuation support");
       }
     } catch {
       throw new ResearchProviderError("invalid_generated_output");

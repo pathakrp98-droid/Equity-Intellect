@@ -32,9 +32,10 @@ RESEARCH_GENERATION_TIMEOUT_MS=45000
 RESEARCH_MAX_EVIDENCE_COUNT=20
 RESEARCH_MAX_CONTEXT_CHARACTERS=40000
 RESEARCH_MAX_OUTPUT_TOKENS=4000
+RESEARCH_MAX_RESPONSE_CHARACTERS=2000000
 ```
 
-`OPENAI_API_KEY` is required for automated research. `RESEARCH_MODEL` is optional; it falls back to `OPENAI_MODEL`, then `gpt-5-mini`. The remaining values are optional server-side limits for each evidence search or snapshot generation request. The provider caps timeouts at 120 seconds, evidence at 50 sources, prompt context at 100,000 characters, and output at 10,000 tokens even when higher values are configured.
+`OPENAI_API_KEY` is required for automated research. `RESEARCH_MODEL` is optional; it falls back to `OPENAI_MODEL`, then `gpt-5-mini`. The remaining values are optional server-side limits for each evidence search or snapshot generation request. The provider caps timeouts at 120 seconds, evidence at 50 sources, prompt context at 100,000 characters, output at 10,000 tokens, and streamed response text at 10,000,000 characters even when higher values are configured.
 
 Keep every research setting on the API server. In particular, never expose `OPENAI_API_KEY` through a browser-side variable or response.
 
