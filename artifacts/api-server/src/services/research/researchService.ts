@@ -1,15 +1,22 @@
 import {
+  automatedResearchSnapshotsTable,
   investmentThesesTable,
   portfolioHoldingsTable,
   portfoliosTable,
+  researchAutomationJobsTable,
   researchCatalystsTable,
   researchCompaniesTable,
+  researchCoverageTargetsTable,
   researchInvalidationTriggersTable,
   researchNotesTable,
   researchRisksTable,
   researchValuationAssumptionsTable,
   db,
 } from "@workspace/db";
+import type {
+  CoverageState,
+  IdentityStatus,
+} from "@workspace/research-contracts";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { calculateResearchCompleteness } from "./completeness";
@@ -147,6 +154,8 @@ interface ResearchCompanyListRow {
   marketValue: number;
   allocationPct: number;
   isArchived: boolean;
+  identityStatus: IdentityStatus | null;
+  automationState: CoverageState | null;
 }
 
 interface ThesisSignal {
@@ -178,6 +187,73 @@ function countByCompany(
     counts.set(row.companyId, (counts.get(row.companyId) ?? 0) + 1);
   }
   return counts;
+}
+
+export function mergeAutomatedResearchListFields<
+  T extends {
+    currentPrice: number | null;
+    previousClose: number | null;
+  },
+>(
+  legacy: T,
+  input: {
+    holding: {
+      marketPrice: number | null;
+      previousClose: number | null;
+    } | null;
+    identityStatus: IdentityStatus | null;
+    automationState: CoverageState | null;
+  },
+): T & {
+  identityStatus: IdentityStatus | null;
+  automationState: CoverageState | null;
+} {
+  return {
+    ...legacy,
+    currentPrice: input.holding?.marketPrice ?? legacy.currentPrice,
+    previousClose: input.holding?.previousClose ?? legacy.previousClose,
+    identityStatus: input.identityStatus,
+    automationState: input.automationState,
+  };
+}
+
+export function deriveResearchAutomationState(input: {
+  identityStatus: IdentityStatus;
+  automationEnabled: boolean;
+  hasAnyTarget: boolean;
+  hasActiveTarget: boolean;
+  latestJob: {
+    status: string;
+    createdAt: Date;
+  } | null;
+  latestSnapshot: {
+    evidenceStrength: "strong" | "moderate" | "limited";
+    validUntil: Date;
+    publishedAt: Date;
+  } | null;
+  now: Date;
+}): CoverageState | null {
+  if (input.hasAnyTarget && !input.hasActiveTarget) return "archived";
+  if (input.identityStatus === "needs_identity") return "needs_identity";
+  if (!input.automationEnabled) return null;
+  if (input.latestJob?.status === "running") return "running";
+  if (input.latestJob?.status === "queued") return "queued";
+  if (
+    input.latestJob &&
+    ["failed", "partial", "dead_letter"].includes(input.latestJob.status) &&
+    (!input.latestSnapshot ||
+      input.latestJob.createdAt >= input.latestSnapshot.publishedAt)
+  ) {
+    return "failed";
+  }
+  if (input.latestSnapshot) {
+    if (input.latestSnapshot.validUntil.getTime() <= input.now.getTime())
+      return "stale";
+    return input.latestSnapshot.evidenceStrength === "limited"
+      ? "limited"
+      : "current";
+  }
+  return input.hasActiveTarget ? "queued" : null;
 }
 
 class ResearchService {
@@ -269,9 +345,19 @@ class ResearchService {
       .where(eq(portfoliosTable.userId, userId));
 
     const companyIds = covered.map((company) => company.id);
-    const [theses, notes, catalysts, risks, invalidations, assumptions] =
+    const [
+      theses,
+      notes,
+      catalysts,
+      risks,
+      invalidations,
+      assumptions,
+      automationTargets,
+      automationJobs,
+      automationSnapshots,
+    ] =
       companyIds.length === 0
-        ? [[], [], [], [], [], []]
+        ? [[], [], [], [], [], [], [], [], []]
         : await Promise.all([
             db
               .select()
@@ -311,6 +397,67 @@ class ResearchService {
                   companyIds,
                 ),
               ),
+            db
+              .select({
+                companyId: researchCoverageTargetsTable.companyId,
+                isActive: researchCoverageTargetsTable.isActive,
+              })
+              .from(researchCoverageTargetsTable)
+              .where(
+                and(
+                  eq(researchCoverageTargetsTable.userId, userId),
+                  inArray(researchCoverageTargetsTable.companyId, companyIds),
+                ),
+              ),
+            db
+              .select({
+                id: researchAutomationJobsTable.id,
+                companyId: researchAutomationJobsTable.companyId,
+                status: researchAutomationJobsTable.status,
+                createdAt: researchAutomationJobsTable.createdAt,
+              })
+              .from(researchAutomationJobsTable)
+              .where(
+                and(
+                  eq(researchAutomationJobsTable.userId, userId),
+                  inArray(researchAutomationJobsTable.companyId, companyIds),
+                ),
+              )
+              .orderBy(
+                desc(researchAutomationJobsTable.createdAt),
+                desc(researchAutomationJobsTable.id),
+              ),
+            db
+              .select({
+                companyId: automatedResearchSnapshotsTable.companyId,
+                evidenceStrength:
+                  automatedResearchSnapshotsTable.evidenceStrength,
+                validUntil: automatedResearchSnapshotsTable.validUntil,
+                publishedAt: automatedResearchSnapshotsTable.publishedAt,
+                version: automatedResearchSnapshotsTable.version,
+              })
+              .from(automatedResearchSnapshotsTable)
+              .innerJoin(
+                researchAutomationJobsTable,
+                and(
+                  eq(
+                    researchAutomationJobsTable.id,
+                    automatedResearchSnapshotsTable.jobId,
+                  ),
+                  eq(researchAutomationJobsTable.userId, userId),
+                  eq(researchAutomationJobsTable.status, "succeeded"),
+                ),
+              )
+              .where(
+                and(
+                  eq(automatedResearchSnapshotsTable.userId, userId),
+                  inArray(
+                    automatedResearchSnapshotsTable.companyId,
+                    companyIds,
+                  ),
+                ),
+              )
+              .orderBy(desc(automatedResearchSnapshotsTable.version)),
           ]);
 
     const thesisByCompany = new Map(
@@ -321,6 +468,32 @@ class ResearchService {
     const riskCounts = countByCompany(risks);
     const invalidationCounts = countByCompany(invalidations);
     const assumptionCounts = countByCompany(assumptions);
+    const automationCompanyIds = new Set(
+      automationTargets.map((target) => target.companyId),
+    );
+    const activeAutomationCompanyIds = new Set(
+      automationTargets
+        .filter((target) => target.isActive)
+        .map((target) => target.companyId),
+    );
+    const latestJobByCompany = new Map<
+      number,
+      (typeof automationJobs)[number]
+    >();
+    for (const job of automationJobs) {
+      if (!latestJobByCompany.has(job.companyId)) {
+        latestJobByCompany.set(job.companyId, job);
+      }
+    }
+    const latestSnapshotByCompany = new Map<
+      number,
+      (typeof automationSnapshots)[number]
+    >();
+    for (const snapshot of automationSnapshots) {
+      if (!latestSnapshotByCompany.has(snapshot.companyId)) {
+        latestSnapshotByCompany.set(snapshot.companyId, snapshot);
+      }
+    }
 
     const holdingByTicker = new Map<string, (typeof holdings)[number]>();
     for (const holding of holdings) {
@@ -342,29 +515,44 @@ class ResearchService {
         invalidationCount: invalidationCounts.get(company.id) ?? 0,
         valuationAssumptionCount: assumptionCounts.get(company.id) ?? 0,
       });
-      return {
-        id: company.id,
-        ticker: company.ticker,
-        name: company.name,
-        exchange: company.exchange,
-        sector: company.sector ?? holding?.sector ?? "Unclassified",
-        industry: company.industry,
-        currentPrice: company.currentPrice ?? holding?.marketPrice ?? null,
-        previousClose: company.previousClose ?? holding?.previousClose ?? null,
-        marketCap: company.marketCap,
-        pe: company.pe,
-        conviction: thesis?.conviction ?? "watch",
-        thesisStatus: thesis?.status ?? "draft",
-        completenessScore: completeness.score,
-        completenessBand: completeness.band,
-        lastUpdated: company.updatedAt,
-        isHolding: holding !== null,
-        isCovered: true,
-        quantity: holding?.quantity ?? 0,
-        marketValue: holding?.marketValue ?? 0,
-        allocationPct: holding?.allocationPct ?? 0,
-        isArchived: company.isArchived,
-      };
+      return mergeAutomatedResearchListFields(
+        {
+          id: company.id,
+          ticker: company.ticker,
+          name: company.name,
+          exchange: company.exchange,
+          sector: company.sector ?? holding?.sector ?? "Unclassified",
+          industry: company.industry,
+          currentPrice: company.currentPrice,
+          previousClose: company.previousClose,
+          marketCap: company.marketCap,
+          pe: company.pe,
+          conviction: thesis?.conviction ?? "watch",
+          thesisStatus: thesis?.status ?? "draft",
+          completenessScore: completeness.score,
+          completenessBand: completeness.band,
+          lastUpdated: company.updatedAt,
+          isHolding: holding !== null,
+          isCovered: true,
+          quantity: holding?.quantity ?? 0,
+          marketValue: holding?.marketValue ?? 0,
+          allocationPct: holding?.allocationPct ?? 0,
+          isArchived: company.isArchived,
+        },
+        {
+          holding,
+          identityStatus: company.identityStatus,
+          automationState: deriveResearchAutomationState({
+            identityStatus: company.identityStatus,
+            automationEnabled: company.automationEnabled,
+            hasAnyTarget: automationCompanyIds.has(company.id),
+            hasActiveTarget: activeAutomationCompanyIds.has(company.id),
+            latestJob: latestJobByCompany.get(company.id) ?? null,
+            latestSnapshot: latestSnapshotByCompany.get(company.id) ?? null,
+            now: new Date(),
+          }),
+        },
+      );
     });
 
     for (const holding of holdingByTicker.values()) {
@@ -392,6 +580,8 @@ class ResearchService {
         marketValue: holding.marketValue,
         allocationPct: holding.allocationPct,
         isArchived: false,
+        identityStatus: null,
+        automationState: null,
       });
     }
 
