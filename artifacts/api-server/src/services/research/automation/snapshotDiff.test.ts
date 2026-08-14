@@ -100,6 +100,21 @@ test("snapshot diff: does not classify severity-boundary risk IDs as high severi
   assert.deepEqual(result.addedRiskIds, ["risk:highest:marketing"]);
 });
 
+test("snapshot diff: requires the documented risk token before an exact severity token", () => {
+  for (const id of ["valuation:high:multiple", "risk:highlight:marketing", "valuation:severe:multiple", "analysis:critical:liquidity"]) {
+    const result = diffSnapshots(snapshot(), snapshot({
+      claims: [...snapshot().claims, { id, text: "A non-high-risk identifier changed.", kind: "ai_judgement", confidence: "moderate", evidenceIds: ["E1"], section: "risks" }],
+    }));
+    assert.equal(result.material, false, id);
+  }
+  for (const id of ["risk:high:multiple", "risk:severe:multiple", "risk:critical:liquidity"]) {
+    const result = diffSnapshots(snapshot(), snapshot({
+      claims: [...snapshot().claims, { id, text: "A high-risk identifier changed.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "risks" }],
+    }));
+    assert.equal(result.material, true, id);
+  }
+});
+
 test("snapshot diff: fails closed when duplicate IDs could hide a material claim", () => {
   const duplicated = snapshot({
     claims: [...snapshot().claims, { id: "assessment", text: "Assessment is now unfavourable.", kind: "ai_judgement", confidence: "high", evidenceIds: ["E1"], section: "assessment" }],

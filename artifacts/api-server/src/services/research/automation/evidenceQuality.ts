@@ -79,8 +79,9 @@ export interface EvidenceStrengthInput {
 function isPrivateIpv4(value: number): boolean {
   const a = value >>> 24;
   const b = value >>> 16 & 0xff;
+  const c = value >>> 8 & 0xff;
   return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
-    a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 0 || b === 168) ||
+    a === 172 && b >= 16 && b <= 31 || a === 192 && b === 0 && c === 0 || a === 192 && b === 168 ||
     a === 100 && b >= 64 && b <= 127 || a === 198 && (b === 18 || b === 19) || a >= 224;
 }
 

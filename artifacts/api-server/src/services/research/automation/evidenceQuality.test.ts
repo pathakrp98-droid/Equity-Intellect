@@ -107,6 +107,21 @@ test("evidence quality: rejects normalized private IPv4 and IPv6 addresses while
   assert.equal(normalizeCanonicalUrl("https://[2606:4700:4700::1111]/dns-query"), "https://[2606:4700:4700::1111]/dns-query");
 });
 
+test("evidence quality: applies exact IPv4 special-use prefix boundaries", () => {
+  for (const [host, expected] of [
+    ["10.0.0.1", null], ["11.0.0.1", "https://11.0.0.1/filing"],
+    ["100.63.0.1", "https://100.63.0.1/filing"], ["100.64.0.1", null], ["100.127.0.1", null], ["100.128.0.1", "https://100.128.0.1/filing"],
+    ["169.253.0.1", "https://169.253.0.1/filing"], ["169.254.0.1", null],
+    ["172.15.0.1", "https://172.15.0.1/filing"], ["172.16.0.1", null], ["172.31.0.1", null], ["172.32.0.1", "https://172.32.0.1/filing"],
+    ["192.0.0.0", null], ["192.0.0.255", null], ["192.0.1.1", "https://192.0.1.1/filing"], ["192.0.3.1", "https://192.0.3.1/filing"],
+    ["192.167.0.1", "https://192.167.0.1/filing"], ["192.168.0.1", null], ["192.169.0.1", "https://192.169.0.1/filing"],
+    ["198.17.0.1", "https://198.17.0.1/filing"], ["198.18.0.1", null], ["198.19.0.1", null], ["198.20.0.1", "https://198.20.0.1/filing"],
+    ["223.0.0.1", "https://223.0.0.1/filing"], ["224.0.0.1", null],
+  ] as const) {
+    assert.equal(normalizeCanonicalUrl(`https://${host}/filing`), expected, host);
+  }
+});
+
 test("evidence quality: preserves public IDN hosts and removes fragments", () => {
   assert.equal(normalizeCanonicalUrl("https://xn--bcher-kva.example/report#overview"), "https://xn--bcher-kva.example/report");
 });

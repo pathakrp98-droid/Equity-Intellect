@@ -36,7 +36,7 @@ function isInvalidation(claim: Claim): boolean {
 }
 
 function isHighSeverityRisk(claim: Claim): boolean {
-  return claim.section === "risks" && /(?:^|[-_:])(?:high|severe|critical)(?=$|[-_:])/i.test(claim.id);
+  return claim.section === "risks" && /^risk[-_:](?:high|severe|critical)(?=$|[-_:])/i.test(claim.id);
 }
 
 function isAssessment(claim: Claim): boolean {
