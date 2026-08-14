@@ -983,18 +983,41 @@ test("OpenAI research: rate limits, upstream failures, and thrown payloads are s
 test("OpenAI research: response cap rejects Content-Length before buffering", async () => {
   const raw = JSON.stringify(completedOutput(snapshot()));
   process.env.RESEARCH_MAX_RESPONSE_CHARACTERS = String(raw.length - 1);
+  const encoder = new TextEncoder();
   let cancelled = false;
+  let offset = 0;
+  let pullCount = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pullCount += 1;
+      if (offset >= raw.length) {
+        controller.close();
+        return;
+      }
+      const next = raw.slice(offset, offset + 32);
+      offset += next.length;
+      controller.enqueue(encoder.encode(next));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
   globalThis.fetch = (async () =>
-    streamedResponse(raw, 32, {
-      contentLength: raw.length,
-      onCancel: () => {
-        cancelled = true;
+    new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(raw.length),
       },
     })) as typeof fetch;
 
   await assertProviderError(
     () => new OpenAIResearchProvider().generateSnapshot(generationInput()),
     "invalid_generated_output",
+  );
+  assert.ok(
+    pullCount <= 1,
+    `Content-Length preflight consumed ${pullCount} stream chunks`,
   );
   assert.equal(cancelled, true);
 });
