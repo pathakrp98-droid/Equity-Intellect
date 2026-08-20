@@ -20,6 +20,14 @@ function facts(overrides: Partial<IntegrationFacts> = {}): IntegrationFacts {
       activeTheses: 5,
       brokenTheses: 0,
       overdueReviews: 0,
+      current: 5,
+      limited: 0,
+      stale: 0,
+      failed: 0,
+      queued: 0,
+      running: 0,
+      latestSuccessfulAt: new Date().toISOString(),
+      providerConfigured: true,
     },
     copilot: { conversations: 2, memories: 3, aiProviderConfigured: true },
     intelligence: {
@@ -109,5 +117,32 @@ test("critical alerts are surfaced as blockers", () => {
   assert.equal(
     result.modules.find((item) => item.key === "alerts")?.status,
     "attention",
+  );
+});
+
+test("limited or stale automation is attention without pretending coverage is missing", () => {
+  const result = evaluateIntegrationReadiness(
+    facts({
+      research: {
+        companies: 5,
+        activeTheses: 0,
+        brokenTheses: 0,
+        overdueReviews: 0,
+        current: 3,
+        limited: 1,
+        stale: 1,
+        failed: 0,
+        queued: 0,
+        running: 0,
+        latestSuccessfulAt: new Date().toISOString(),
+        providerConfigured: true,
+      },
+    }),
+  );
+  const research = result.modules.find((item) => item.key === "research");
+  assert.equal(research?.status, "attention");
+  assert.ok(research?.metrics.some((item) => item.label === "Current"));
+  assert.ok(
+    !result.recommendations.some((item) => /workspace|transaction history/i.test(item)),
   );
 });

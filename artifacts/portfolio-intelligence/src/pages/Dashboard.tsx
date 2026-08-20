@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   CloudOff,
   Database,
+  ExternalLink,
   RefreshCw,
   ShieldAlert,
   Sparkles,
@@ -421,9 +422,16 @@ function ActionRow({
   onOpen: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
       className="flex w-full items-start gap-3 rounded-lg border bg-secondary/15 p-4 text-left transition-colors hover:bg-secondary/40"
     >
       <span
@@ -442,9 +450,20 @@ function ActionRow({
         <p className="mt-1 text-sm leading-5 text-muted-foreground">
           {action.rationale}
         </p>
+        {action.sourceLinks?.[0] && (
+          <a
+            href={action.sourceLinks[0]}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            View evidence <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
       </div>
       <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
+    </div>
   );
 }
 
@@ -472,6 +491,16 @@ function RiskRow({ risk }: { risk: MorningBriefRisk }) {
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         {risk.detail}
       </p>
+      {risk.sourceLinks?.[0] && (
+        <a
+          href={risk.sourceLinks[0]}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          View evidence <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
     </div>
   );
 }

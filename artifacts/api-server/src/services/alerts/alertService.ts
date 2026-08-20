@@ -16,7 +16,9 @@ import {
 import { and, desc, eq, gte } from "drizzle-orm";
 
 import { portfolioService } from "../portfolio/portfolioService";
+import { researchService } from "../research/researchService";
 import {
+  buildResearchSnapshotAlertCandidates,
   evaluateRule,
   makeSystemDedupeKey,
   meetsSeverityThreshold,
@@ -404,6 +406,10 @@ class AlertService {
     const portfolioTickers = new Set(
       overview.holdings.map((holding) => holding.ticker.toUpperCase()),
     );
+    const automatedResearchSignals = await researchService.getAutomatedSignals(
+      userId,
+      [...portfolioTickers],
+    );
     const recentNewsSince = new Date(now.getTime() - 7 * 86_400_000);
     const [quoteRows, newsRows, eventRows, companyTheses, invalidations, providerRuns] =
       await Promise.all([
@@ -499,6 +505,32 @@ class AlertService {
       }));
 
     const candidates: AlertCandidate[] = [];
+    for (const signal of automatedResearchSignals.values()) {
+      if (signal.researchOrigin !== "automated") continue;
+      for (const candidate of buildResearchSnapshotAlertCandidates(
+        {
+          ticker: signal.ticker,
+          snapshotId: signal.snapshotId,
+          snapshotVersion: signal.snapshotVersion,
+          thesisStatus: signal.thesisStatus,
+          freshnessStatus: signal.freshnessStatus,
+          materialChange: signal.materialChange,
+          topRisks: signal.topRisks,
+          invalidations: signal.invalidations,
+          sources: signal.sources,
+          automationJobId: signal.automationJobId,
+        },
+        now,
+      )) {
+        if (
+          candidate.alertType === "provider_failure"
+            ? preferences.enableProviderFailureAlerts
+            : preferences.enableThesisAlerts
+        ) {
+          candidates.push(candidate);
+        }
+      }
+    }
     for (const rule of rules.filter((item) => item.isEnabled)) {
       const isPriceRule = [
         "price_above",
@@ -545,6 +577,11 @@ class AlertService {
     if (preferences.enableThesisAlerts) {
       for (const thesis of theses) {
         if (!portfolioTickers.has(thesis.ticker)) continue;
+        if (
+          automatedResearchSignals.get(thesis.ticker)?.researchOrigin ===
+          "automated"
+        )
+          continue;
         if (["weakening", "broken"].includes(thesis.status)) {
           candidates.push({
             ruleId: null,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildResearchSnapshotAlertCandidates,
   evaluateRule,
   isRuleCoolingDown,
   meetsSeverityThreshold,
@@ -96,4 +97,66 @@ test("news keyword rule uses source item id for deduplication", () => {
     },
   );
   assert.equal(candidates[0].dedupeKey, "rule:2:news:99");
+});
+
+test("material automated deterioration creates one deduped AI-labelled alert", () => {
+  const candidates = buildResearchSnapshotAlertCandidates(
+    {
+      ticker: "INFY",
+      snapshotId: 44,
+      snapshotVersion: 3,
+      thesisStatus: "weakening",
+      freshnessStatus: "current",
+      materialChange: {
+        material: true,
+        headline: "Margins deteriorated.",
+        changedStatementIds: ["thesis-status"],
+      },
+      topRisks: ["Margin pressure may persist."],
+      invalidations: [],
+      sources: [
+        {
+          citationKey: "E1",
+          title: "Exchange filing",
+          url: "https://example.com/filing",
+        },
+      ],
+      automationJobId: 72,
+    },
+    now,
+  );
+
+  assert.equal(candidates.length, 1);
+  assert.equal(
+    candidates[0]?.dedupeKey,
+    "system:thesis_status:INFY:research-snapshot-3",
+  );
+  assert.match(candidates[0]?.detail ?? "", /^AI judgement:/);
+  assert.equal(candidates[0]?.metadata.aiGenerated, true);
+  assert.deepEqual(candidates[0]?.metadata.sourceLinks, [
+    "https://example.com/filing",
+  ]);
+});
+
+test("a material but non-deteriorating snapshot does not create an alert", () => {
+  const candidates = buildResearchSnapshotAlertCandidates(
+    {
+      ticker: "INFY",
+      snapshotId: 45,
+      snapshotVersion: 4,
+      thesisStatus: "intact",
+      freshnessStatus: "current",
+      materialChange: {
+        material: true,
+        headline: "Evidence quality improved.",
+        changedStatementIds: ["catalyst:results"],
+      },
+      topRisks: ["A known risk remains."],
+      invalidations: [],
+      sources: [],
+      automationJobId: 73,
+    },
+    now,
+  );
+  assert.deepEqual(candidates, []);
 });

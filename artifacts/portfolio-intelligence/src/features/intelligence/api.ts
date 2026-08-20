@@ -78,6 +78,7 @@ export interface MorningBriefAction {
   rationale: string;
   actionType: "review" | "research" | "monitor" | "rebalance" | "verify_data";
   sourceIds: string[];
+  sourceLinks?: string[];
 }
 
 export interface MorningBriefRisk {
@@ -87,6 +88,7 @@ export interface MorningBriefRisk {
   title: string;
   detail: string;
   sourceIds: string[];
+  sourceLinks?: string[];
 }
 
 export interface MorningBrief {

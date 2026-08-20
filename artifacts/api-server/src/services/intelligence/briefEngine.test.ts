@@ -162,3 +162,46 @@ test("flags stale data and includes high-impact upcoming events", () => {
     result.priorityActions.some((action) => action.id === "prepare-event-1"),
   );
 });
+
+test("includes only new material automated research changes with AI labels and sources", () => {
+  const input = baseInput();
+  input.researchChangesSince = new Date("2026-07-18T00:00:00.000Z");
+  input.researchSignals = [
+    {
+      ticker: "RELIANCE",
+      conviction: "watch",
+      status: "weakening",
+      completenessScore: 75,
+      nextReviewAt: null,
+      targetPrice: 5_500,
+      researchOrigin: "automated",
+      snapshotVersion: 4,
+      generatedAt: new Date("2026-07-19T00:30:00.000Z"),
+      freshnessStatus: "current",
+      evidenceStrength: "moderate",
+      materialChange: {
+        material: true,
+        headline: "Margin evidence deteriorated.",
+      },
+      topRisks: ["Margin pressure may persist."],
+      catalysts: [],
+      sourceLinks: ["https://example.com/filing"],
+    },
+  ];
+
+  const result = buildMorningBrief(input);
+  const action = result.priorityActions.find(
+    (item) => item.id === "research-change-RELIANCE-4",
+  );
+  assert.match(action?.rationale ?? "", /^AI judgement:/);
+  assert.deepEqual(action?.sourceLinks, ["https://example.com/filing"]);
+
+  input.researchChangesSince = new Date("2026-07-19T01:00:00.000Z");
+  const repeated = buildMorningBrief(input);
+  assert.equal(
+    repeated.priorityActions.some((item) =>
+      item.id.startsWith("research-change-"),
+    ),
+    false,
+  );
+});

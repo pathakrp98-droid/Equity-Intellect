@@ -100,6 +100,12 @@ export interface GuardianResearchContext {
   sourceCount: number;
   lastReviewedAt: string | null;
   isSmallCap: boolean;
+  researchOrigin?: "automated" | "manual" | "none";
+  evidenceStrength?: "strong" | "moderate" | "limited" | "none";
+  freshnessStatus?: "current" | "stale" | "failed" | "none";
+  snapshotId?: number | null;
+  thresholdOrigin?: "user_research" | "ai_judgement" | "none";
+  unknownCount?: number;
 }
 
 export interface GuardianMarketContext {
@@ -525,7 +531,17 @@ export function runGuardianCheck(args: {
     hard.push({ ruleId: "DRAWDOWN_LOCK", ruleName: "Portfolio Drawdown Lock", currentValue: portfolio.maxDrawdownPct, threshold: limits.maxPortfolioDrawdownPct, message: "New risk is blocked while portfolio drawdown exceeds the configured limit.", severity: "blocking" });
   }
 
-  if (projected.isBuy && research?.thesisStatus === "broken") {
+  const automatedResearchDecisionGrade =
+    research?.researchOrigin !== "automated" ||
+    (research.freshnessStatus === "current" &&
+      research.evidenceStrength !== "limited" &&
+      research.evidenceStrength !== "none");
+
+  if (
+    projected.isBuy &&
+    research?.thesisStatus === "broken" &&
+    automatedResearchDecisionGrade
+  ) {
     hard.push({ ruleId: "BROKEN_THESIS", ruleName: "Broken Thesis", message: "Buying or adding is blocked while the stored thesis is marked broken.", severity: "blocking" });
   }
 
@@ -564,6 +580,19 @@ export function runGuardianCheck(args: {
   if (requirements.requireMaxAcceptableLoss && (!proposal.maxAcceptableLossPct || proposal.maxAcceptableLossPct <= 0)) failures.push({ field: "maxAcceptableLossPct", message: "Maximum acceptable loss must be defined." });
 
   const researchScore = research?.completenessScore ?? 0;
+  if (
+    projected.isBuy &&
+    research?.researchOrigin === "automated" &&
+    !automatedResearchDecisionGrade
+  ) {
+    failures.push({
+      field: "researchEvidence",
+      message:
+        research.freshnessStatus === "current"
+          ? "AI research is based on limited evidence. Review the cited sources before committing new capital."
+          : "AI research is stale or its latest refresh failed. Review fresh evidence before committing new capital.",
+    });
+  }
   if (projected.isBuy && researchScore < requirements.minResearchCompletenessScore) {
     failures.push({ field: "researchCompleteness", message: `Research completeness is ${researchScore}/100; minimum is ${requirements.minResearchCompletenessScore}.` });
   } else if (research) {

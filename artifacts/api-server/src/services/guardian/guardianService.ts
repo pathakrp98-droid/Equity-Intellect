@@ -290,6 +290,10 @@ class GuardianService {
       holdingsOnly: true,
       archived: false,
     });
+    const automatedSignals = await researchService.getAutomatedSignals(
+      userId,
+      rows.map((row) => row.ticker),
+    );
     return Promise.all(
       rows.map(async (row) => {
         if (!row.isCovered) {
@@ -308,6 +312,40 @@ class GuardianService {
             sourceCount: 0,
             lastReviewedAt: null,
             isSmallCap: false,
+            researchOrigin: "none" as const,
+            evidenceStrength: "none" as const,
+            freshnessStatus: "none" as const,
+            snapshotId: null,
+            thresholdOrigin: "none" as const,
+            unknownCount: 0,
+          };
+        }
+        const automated = automatedSignals.get(row.ticker);
+        if (automated?.researchOrigin === "automated") {
+          return {
+            ticker: row.ticker,
+            isCovered: true,
+            completenessScore: automated.completenessScore,
+            thesisStatus: automated.thesisStatus,
+            conviction: "watch" as const,
+            targetPrice: automated.targetPrice,
+            bearPrice: null,
+            maxAcceptableLossPct: null,
+            investmentHorizon: null,
+            invalidationCount: automated.invalidations.length,
+            riskCount: automated.topRisks.length,
+            sourceCount: automated.sources.length,
+            lastReviewedAt: automated.generatedAt?.toISOString() ?? null,
+            isSmallCap:
+              typeof row.marketCap === "number" &&
+              row.marketCap > 0 &&
+              row.marketCap < 20_000,
+            researchOrigin: "automated" as const,
+            evidenceStrength: automated.evidenceStrength,
+            freshnessStatus: automated.freshnessStatus,
+            snapshotId: automated.snapshotId,
+            thresholdOrigin: automated.thresholdOrigin,
+            unknownCount: automated.unknownCount,
           };
         }
         const workspace = await researchService.getWorkspace(userId, row.ticker);
@@ -335,6 +373,14 @@ class GuardianService {
             typeof workspace.company.marketCap === "number" &&
             workspace.company.marketCap > 0 &&
             workspace.company.marketCap < 20_000,
+          researchOrigin: "manual" as const,
+          evidenceStrength: "none" as const,
+          freshnessStatus: "none" as const,
+          snapshotId: null,
+          thresholdOrigin: workspace.thesis?.targetPrice
+            ? ("user_research" as const)
+            : ("none" as const),
+          unknownCount: 0,
         };
       }),
     );

@@ -159,6 +159,15 @@ export interface BriefResearchSignal {
   completenessScore: number;
   nextReviewAt: Date | null;
   targetPrice: number | null;
+  researchOrigin?: "automated" | "manual" | "none";
+  snapshotVersion?: number | null;
+  generatedAt?: Date | null;
+  freshnessStatus?: "current" | "stale" | "failed" | "none";
+  evidenceStrength?: "strong" | "moderate" | "limited" | "none";
+  materialChange?: { material: boolean; headline: string } | null;
+  topRisks?: string[];
+  catalysts?: string[];
+  sourceLinks?: string[];
 }
 
 export interface BriefMarketPoint {

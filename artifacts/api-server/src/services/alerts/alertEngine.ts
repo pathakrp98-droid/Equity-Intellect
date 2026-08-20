@@ -81,6 +81,112 @@ export interface AlertCandidate {
   metadata: Record<string, unknown>;
 }
 
+export interface ResearchSnapshotAlertSignal {
+  ticker: string;
+  snapshotId: number | null;
+  snapshotVersion: number | null;
+  thesisStatus: string;
+  freshnessStatus: "current" | "stale" | "failed" | "none";
+  materialChange: {
+    material: boolean;
+    headline: string;
+    addedRiskIds?: string[];
+    changedStatementIds?: string[];
+  } | null;
+  topRisks: string[];
+  invalidations: string[];
+  sources: Array<{ citationKey: string; title: string; url: string }>;
+  automationJobId?: number | null;
+}
+
+export function buildResearchSnapshotAlertCandidates(
+  signal: ResearchSnapshotAlertSignal,
+  now: Date,
+): AlertCandidate[] {
+  const addedHighRisk = Boolean(
+    signal.materialChange?.addedRiskIds?.some((id) =>
+      /^risk[-_:](?:high|severe|critical)(?=$|[-_:])/i.test(id),
+    ),
+  );
+  const invalidationChanged = Boolean(
+    signal.materialChange?.changedStatementIds?.some((id) =>
+      /^invalidation[-_:]/i.test(id),
+    ),
+  );
+  const thesisDeteriorated = Boolean(
+    ["weakening", "broken"].includes(signal.thesisStatus) &&
+      signal.materialChange?.changedStatementIds?.some(
+        (id) => /^thesis[-_:]?status$/i.test(id) || id === "assessment",
+      ),
+  );
+  if (
+    signal.snapshotVersion &&
+    signal.materialChange?.material &&
+    (thesisDeteriorated || invalidationChanged || addedHighRisk)
+  ) {
+    const invalidated = invalidationChanged;
+    const alertType: AlertRuleType = invalidated
+      ? "invalidation_trigger"
+      : "thesis_status";
+    return [
+      {
+        ruleId: null,
+        ticker: signal.ticker,
+        alertType,
+        severity:
+          signal.thesisStatus === "broken" || invalidated ? "critical" : "high",
+        title: `${signal.ticker} automated research changed`,
+        detail: `AI judgement: ${signal.materialChange.headline}${signal.topRisks[0] ? ` Key risk: ${signal.topRisks[0]}` : ""}`,
+        source: "Automated Research",
+        sourceUrl: signal.sources[0]?.url ?? null,
+        dedupeKey: makeSystemDedupeKey(
+          alertType,
+          signal.ticker,
+          `research-snapshot-${signal.snapshotVersion}`,
+        ),
+        triggeredAt: now,
+        metadata: {
+          aiGenerated: true,
+          researchSnapshotId: signal.snapshotId,
+          researchSnapshotVersion: signal.snapshotVersion,
+          evidenceIds: signal.sources.map((source) => source.citationKey),
+          sourceLinks: signal.sources.map((source) => source.url),
+          researchSignal: invalidated
+            ? "invalidation_triggered"
+            : "material_deterioration",
+        },
+      },
+    ];
+  }
+  if (signal.freshnessStatus === "failed" && signal.automationJobId) {
+    return [
+      {
+        ruleId: null,
+        ticker: signal.ticker,
+        alertType: "provider_failure",
+        severity: "high",
+        title: `${signal.ticker} automated research refresh failed`,
+        detail:
+          "The latest automated research refresh failed. The previous cited snapshot remains available.",
+        source: "Automated Research",
+        sourceUrl: null,
+        dedupeKey: makeSystemDedupeKey(
+          "provider_failure",
+          signal.ticker,
+          `research-job-${signal.automationJobId}`,
+        ),
+        triggeredAt: now,
+        metadata: {
+          aiGenerated: true,
+          researchSnapshotId: signal.snapshotId,
+          researchJobId: signal.automationJobId,
+        },
+      },
+    ];
+  }
+  return [];
+}
+
 const severityRanks: Record<AlertSeverity, number> = {
   low: 1,
   medium: 2,

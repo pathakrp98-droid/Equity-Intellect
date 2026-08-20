@@ -1,5 +1,6 @@
 import {
   automatedResearchSnapshotsTable,
+  automatedResearchSourcesTable,
   investmentThesesTable,
   portfolioHoldingsTable,
   portfoliosTable,
@@ -17,9 +18,15 @@ import type {
   CoverageState,
   IdentityStatus,
 } from "@workspace/research-contracts";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 
 import { calculateResearchCompleteness } from "./completeness";
+import {
+  buildAutomatedResearchSignal,
+  type AutomatedResearchSignal,
+} from "./automatedResearchSignals";
+
+export type { AutomatedResearchSignal } from "./automatedResearchSignals";
 
 export type ResearchConviction = "high" | "medium" | "low" | "watch";
 export type ThesisStatus =
@@ -920,6 +927,163 @@ class ResearchService {
       valuationAssumptions: assumptions,
       completeness,
     };
+  }
+
+  async getAutomatedSignals(
+    userId: string,
+    tickerValues: string[],
+  ): Promise<Map<string, AutomatedResearchSignal>> {
+    const tickers = [...new Set(tickerValues.map(normalizeTicker))];
+    if (tickers.length === 0)
+      return new Map<string, AutomatedResearchSignal>();
+    const aliasTargets = await db
+      .select({
+        companyId: researchCoverageTargetsTable.companyId,
+        ticker: researchCoverageTargetsTable.ticker,
+      })
+      .from(researchCoverageTargetsTable)
+      .where(
+        and(
+          eq(researchCoverageTargetsTable.userId, userId),
+          eq(researchCoverageTargetsTable.isActive, true),
+          inArray(researchCoverageTargetsTable.ticker, tickers),
+        ),
+      );
+    const aliasCompanyIds = [
+      ...new Set(aliasTargets.map((target) => target.companyId)),
+    ];
+    const companies = await db
+      .select()
+      .from(researchCompaniesTable)
+      .where(
+        and(
+          eq(researchCompaniesTable.userId, userId),
+          aliasCompanyIds.length
+            ? or(
+                inArray(researchCompaniesTable.ticker, tickers),
+                inArray(researchCompaniesTable.id, aliasCompanyIds),
+              )
+            : inArray(researchCompaniesTable.ticker, tickers),
+        ),
+      );
+    if (companies.length === 0)
+      return new Map<string, AutomatedResearchSignal>();
+    const companyIds = companies.map((company) => company.id);
+    const [theses, snapshots, jobs] = await Promise.all([
+      db
+        .select()
+        .from(investmentThesesTable)
+        .where(inArray(investmentThesesTable.companyId, companyIds)),
+      db
+        .select()
+        .from(automatedResearchSnapshotsTable)
+        .innerJoin(
+          researchAutomationJobsTable,
+          and(
+            eq(
+              researchAutomationJobsTable.id,
+              automatedResearchSnapshotsTable.jobId,
+            ),
+            eq(researchAutomationJobsTable.userId, userId),
+            eq(researchAutomationJobsTable.status, "succeeded"),
+          ),
+        )
+        .where(
+          and(
+            eq(automatedResearchSnapshotsTable.userId, userId),
+            inArray(automatedResearchSnapshotsTable.companyId, companyIds),
+          ),
+        )
+        .orderBy(desc(automatedResearchSnapshotsTable.version)),
+      db
+        .select()
+        .from(researchAutomationJobsTable)
+        .where(
+          and(
+            eq(researchAutomationJobsTable.userId, userId),
+            inArray(researchAutomationJobsTable.companyId, companyIds),
+          ),
+        )
+        .orderBy(
+          desc(researchAutomationJobsTable.createdAt),
+          desc(researchAutomationJobsTable.id),
+        ),
+    ]);
+    const thesisByCompany = new Map(
+      theses.map((thesis) => [thesis.companyId, thesis]),
+    );
+    const latestSnapshotByCompany = new Map<
+      number,
+      (typeof snapshots)[number]["automated_research_snapshots"]
+    >();
+    for (const row of snapshots) {
+      if (!latestSnapshotByCompany.has(row.automated_research_snapshots.companyId)) {
+        latestSnapshotByCompany.set(
+          row.automated_research_snapshots.companyId,
+          row.automated_research_snapshots,
+        );
+      }
+    }
+    const latestJobByCompany = new Map<number, (typeof jobs)[number]>();
+    for (const job of jobs) {
+      if (!latestJobByCompany.has(job.companyId))
+        latestJobByCompany.set(job.companyId, job);
+    }
+    const snapshotIds = [...latestSnapshotByCompany.values()].map(
+      (snapshot) => snapshot.id,
+    );
+    const sourceRows = snapshotIds.length
+      ? await db
+          .select()
+          .from(automatedResearchSourcesTable)
+          .where(
+            and(
+              eq(automatedResearchSourcesTable.userId, userId),
+              inArray(automatedResearchSourcesTable.snapshotId, snapshotIds),
+            ),
+          )
+      : [];
+    const sourcesBySnapshot = new Map<number, typeof sourceRows>();
+    for (const source of sourceRows) {
+      const rows = sourcesBySnapshot.get(source.snapshotId) ?? [];
+      rows.push(source);
+      sourcesBySnapshot.set(source.snapshotId, rows);
+    }
+    const now = new Date();
+    return new Map(
+      companies.flatMap((company) => {
+        const snapshot = latestSnapshotByCompany.get(company.id) ?? null;
+        const thesis = thesisByCompany.get(company.id) ?? null;
+        const requestedTickers = new Set(
+          aliasTargets
+            .filter((target) => target.companyId === company.id)
+            .map((target) => target.ticker),
+        );
+        if (tickers.includes(company.ticker)) requestedTickers.add(company.ticker);
+        return [...requestedTickers].map((ticker) => [
+          ticker,
+          buildAutomatedResearchSignal({
+            ticker,
+            companyId: company.id,
+            manualThesis: thesis
+              ? { status: thesis.status, targetPrice: thesis.targetPrice }
+              : null,
+            snapshot,
+            latestJob: latestJobByCompany.get(company.id) ?? null,
+            sources: (snapshot
+              ? (sourcesBySnapshot.get(snapshot.id) ?? [])
+              : []
+            ).map((source) => ({
+              citationKey: source.citationKey,
+              title: source.title,
+              url: source.canonicalUrl,
+              authority: source.authority,
+            })),
+            now,
+          }),
+        ] as const);
+      }),
+    );
   }
 
   async getThesisSignals(

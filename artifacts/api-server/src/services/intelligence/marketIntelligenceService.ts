@@ -378,21 +378,56 @@ class MarketIntelligenceService {
         )
         .where(eq(researchCompaniesTable.userId, userId)),
     ]);
+    const automatedSignals = await researchService.getAutomatedSignals(
+      userId,
+      companies.map((company) => company.ticker),
+    );
     const detailByTicker = new Map(thesisRows.map((row) => [row.ticker, row]));
     return companies
       .filter((company) => company.isHolding)
-      .map((company) => ({
-        ticker: company.ticker,
-        conviction: company.conviction,
-        status: company.thesisStatus,
-        completenessScore: company.completenessScore,
-        nextReviewAt: detailByTicker.get(company.ticker)?.nextReviewAt ?? null,
-        targetPrice: detailByTicker.get(company.ticker)?.targetPrice ?? null,
-      }));
+      .map((company) => {
+        const automated = automatedSignals.get(company.ticker);
+        if (automated?.researchOrigin === "automated") {
+          return {
+            ticker: company.ticker,
+            conviction: "watch",
+            status: automated.thesisStatus,
+            completenessScore: automated.completenessScore,
+            nextReviewAt: null,
+            targetPrice: automated.targetPrice,
+            researchOrigin: "automated" as const,
+            snapshotVersion: automated.snapshotVersion,
+            generatedAt: automated.generatedAt,
+            freshnessStatus: automated.freshnessStatus,
+            evidenceStrength: automated.evidenceStrength,
+            materialChange: automated.materialChange,
+            topRisks: automated.topRisks,
+            catalysts: automated.catalysts,
+            sourceLinks: automated.sources.map((source) => source.url),
+          };
+        }
+        return {
+          ticker: company.ticker,
+          conviction: company.conviction,
+          status: company.thesisStatus,
+          completenessScore: company.completenessScore,
+          nextReviewAt: detailByTicker.get(company.ticker)?.nextReviewAt ?? null,
+          targetPrice: detailByTicker.get(company.ticker)?.targetPrice ?? null,
+          researchOrigin: company.isCovered ? ("manual" as const) : ("none" as const),
+        };
+      });
   }
 
   async generateBrief(userId: string, now = new Date()) {
-    const [overview, preferences, points, news, events, researchSignals] =
+    const [
+      overview,
+      preferences,
+      points,
+      news,
+      events,
+      researchSignals,
+      previousBrief,
+    ] =
       await Promise.all([
         portfolioService.getOverview(userId),
         this.getPreferences(userId),
@@ -400,6 +435,13 @@ class MarketIntelligenceService {
         this.getNews(userId, { portfolioOnly: true, days: 14, limit: 100 }),
         this.getCalendar(userId, { portfolioOnly: true, days: 30 }),
         this.getResearchSignals(userId),
+        db
+          .select({ generatedAt: morningBriefsTable.generatedAt })
+          .from(morningBriefsTable)
+          .where(eq(morningBriefsTable.userId, userId))
+          .orderBy(desc(morningBriefsTable.generatedAt))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
       ]);
     if (!overview.snapshot) throw new Error("Portfolio snapshot is unavailable");
 
@@ -433,6 +475,7 @@ class MarketIntelligenceService {
         priceSource: holding.priceSource,
       })),
       researchSignals,
+      researchChangesSince: previousBrief?.generatedAt ?? null,
       marketPoints: points as BriefMarketPoint[],
       news: news as BriefNewsItem[],
       events: events as BriefEventItem[],

@@ -24,6 +24,14 @@ export interface IntegrationFacts {
     activeTheses: number;
     brokenTheses: number;
     overdueReviews: number;
+    current: number;
+    limited: number;
+    stale: number;
+    failed: number;
+    queued: number;
+    running: number;
+    latestSuccessfulAt: string | null;
+    providerConfigured: boolean;
   };
   copilot: {
     conversations: number;
@@ -150,33 +158,58 @@ export function evaluateIntegrationReadiness(
           : "Portfolio exists but needs fresher or more complete data.",
       [
         { label: "Holdings", value: facts.portfolio.holdings },
-        { label: "Transactions", value: facts.portfolio.transactions },
+        {
+          label: "Price coverage",
+          value: `${facts.portfolio.holdingsWithPrices}/${facts.portfolio.holdings}`,
+        },
         { label: "Stale prices", value: facts.portfolio.stalePrices },
       ],
       "/portfolio",
     ),
   );
 
+  const automatedCoverage =
+    facts.research.current + facts.research.limited + facts.research.stale;
   const researchCoverage =
     facts.portfolio.holdings > 0
-      ? Math.min(1, facts.research.companies / facts.portfolio.holdings)
-      : facts.research.companies > 0
+      ? Math.min(
+          1,
+          Math.max(facts.research.companies, automatedCoverage) /
+            facts.portfolio.holdings,
+        )
+      : Math.max(facts.research.companies, automatedCoverage) > 0
         ? 1
         : 0;
   let researchScore = Math.round(researchCoverage * 7);
   researchScore += ratioScore(
-    facts.research.activeTheses,
-    Math.max(1, facts.research.companies),
+    facts.research.current + facts.research.activeTheses,
+    Math.max(1, facts.portfolio.holdings),
     6,
   );
   researchScore += facts.research.overdueReviews === 0 ? 2 : 0;
   let researchStatus: IntegrationModuleStatus = "ready";
-  if (facts.research.companies === 0) researchStatus = "attention";
+  if (facts.research.companies === 0 && automatedCoverage === 0)
+    researchStatus = "attention";
   if (researchCoverage < 1 || facts.research.overdueReviews > 0)
     researchStatus = "attention";
   if (facts.research.brokenTheses > 0) researchStatus = "attention";
-  if (facts.portfolio.holdings > 0 && facts.research.companies === 0) {
-    recommendations.push("Create research workspaces for portfolio holdings.");
+  const automatedAttention =
+    facts.research.limited +
+    facts.research.stale +
+    facts.research.failed +
+    facts.research.queued +
+    facts.research.running;
+  if (automatedAttention > 0 || !facts.research.providerConfigured)
+    researchStatus = "attention";
+  if (facts.portfolio.holdings > 0 && researchCoverage < 1) {
+    recommendations.push(
+      "Automated research is still being prepared for some holdings.",
+    );
+  }
+  if (!facts.research.providerConfigured) {
+    recommendations.push(
+      "Connect the AI research provider to refresh evidence; saved research remains available.",
+    );
   }
   if (facts.research.overdueReviews > 0) {
     recommendations.push(
@@ -191,12 +224,12 @@ export function evaluateIntegrationReadiness(
       researchScore,
       15,
       researchStatus === "ready"
-        ? "Research coverage and review cadence are healthy."
-        : "Research coverage, thesis status or review cadence needs attention.",
+        ? "Evidence-backed automated research is current."
+        : "Some automated research is limited, stale, queued or needs attention.",
       [
-        { label: "Companies", value: facts.research.companies },
-        { label: "Active theses", value: facts.research.activeTheses },
-        { label: "Overdue reviews", value: facts.research.overdueReviews },
+        { label: "Current", value: facts.research.current },
+        { label: "Limited", value: facts.research.limited },
+        { label: "Needs attention", value: facts.research.stale + facts.research.failed },
       ],
       "/research",
     ),
