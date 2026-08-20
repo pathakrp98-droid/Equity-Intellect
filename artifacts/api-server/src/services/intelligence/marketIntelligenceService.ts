@@ -7,11 +7,13 @@ import {
   marketNewsTable,
   marketProviderRunsTable,
   morningBriefsTable,
+  researchAutomationTriggerEventsTable,
   researchCompaniesTable,
 } from "@workspace/db";
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 
 import { portfolioService } from "../portfolio/portfolioService";
+import { buildMaterialResearchTriggers } from "../research/automation/researchTriggers";
 import { researchService } from "../research/researchService";
 import { buildMorningBrief } from "./briefEngine";
 import { marketIntelligenceProvider } from "./httpProvider";
@@ -122,6 +124,11 @@ class MarketIntelligenceService {
       { ...payload, provider: providerOverride ?? payload.provider },
       tickers,
     );
+    const researchTriggers = buildMaterialResearchTriggers(
+      userId,
+      normalized,
+      new Set(tickers.map((ticker) => ticker.trim().toUpperCase())),
+    );
 
     await db.transaction(async (tx) => {
       for (const point of normalized.points) {
@@ -195,6 +202,17 @@ class MarketIntelligenceService {
               metadata: event.metadata,
               updatedAt: new Date(),
             },
+          });
+      }
+      if (researchTriggers.length > 0) {
+        await tx
+          .insert(researchAutomationTriggerEventsTable)
+          .values(researchTriggers)
+          .onConflictDoNothing({
+            target: [
+              researchAutomationTriggerEventsTable.userId,
+              researchAutomationTriggerEventsTable.dedupeKey,
+            ],
           });
       }
     });

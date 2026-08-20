@@ -7,7 +7,7 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "test:research": "tsx --test lib/research-contracts/src/**/*.test.ts artifacts/api-server/src/services/research/**/*.test.ts artifacts/portfolio-intelligence/src/features/research/**/*.test.ts",
+    "test:research": "tsx --test lib/research-contracts/src/**/*.test.ts artifacts/api-server/src/services/research/**/*.test.ts artifacts/api-server/src/routes/researchAutomation.test.ts artifacts/api-server/src/services/portfolio/portfolioResearchTrigger.integration.test.ts artifacts/api-server/src/services/intelligence/marketResearchTrigger.test.ts artifacts/portfolio-intelligence/src/features/research/**/*.test.ts",
     "test:db": "tsx --test lib/db/src/**/*.test.ts"
   },
   "private": true,
