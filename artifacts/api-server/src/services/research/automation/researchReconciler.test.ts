@@ -669,6 +669,44 @@ test("reconcile review: identity advisory lock is acquired before company lookup
   ]);
 });
 
+test("reconcile review: all unique identity locks use one sorted pre-lookup order", async () => {
+  const alpha = holding();
+  const beta = holding({
+    ticker: "TCS",
+    name: "Tata Consultancy Services Limited",
+    isin: "INE009A01021",
+  });
+  const duplicateAlpha = holding({
+    ticker: "RIL",
+    name: "Same identity under another ticker alias",
+  });
+  const repositories = [new MemoryRepository(), new MemoryRepository()];
+  repositories[0]!.addPortfolio("user-a", 10, [beta, alpha, duplicateAlpha]);
+  repositories[1]!.addPortfolio("user-a", 10, [duplicateAlpha, alpha, beta]);
+
+  for (const repository of repositories) {
+    await reconcilePortfolioHoldings(repository, {
+      userId: "user-a",
+      portfolioId: 10,
+      now: firstRunAt,
+    });
+  }
+
+  const expectedLocks = ["lock:isin:INE002A01018", "lock:isin:INE009A01021"];
+  for (const repository of repositories) {
+    const operations = repository.reconciliationOperations;
+    const locks = operations.filter((operation) =>
+      operation.startsWith("lock:"),
+    );
+    assert.deepEqual(locks, expectedLocks);
+    assert.deepEqual(operations.slice(0, expectedLocks.length), expectedLocks);
+    assert.equal(
+      operations.findIndex((operation) => operation.startsWith("find:")),
+      expectedLocks.length,
+    );
+  }
+});
+
 function compiled(statement: SQL): { sql: string; params: unknown[] } {
   const query = new PgDialect().sqlToQuery(statement);
   return { sql: query.sql.replace(/\s+/g, " ").trim(), params: query.params };
@@ -939,6 +977,7 @@ function publicationFixture() {
 function publicationDatabase(input: {
   existingJobSnapshotId?: number;
   existingContentSnapshotId?: number;
+  jobLeaseOwned?: boolean;
 }) {
   const operations: string[] = [];
   let insertedSnapshot: Record<string, unknown> | null = null;
@@ -951,7 +990,7 @@ function publicationDatabase(input: {
         /for update/i.test(query)
       ) {
         operations.push("lock-job");
-        return { rows: [{ id: 9 }] };
+        return { rows: input.jobLeaseOwned === false ? [] : [{ id: 9 }] };
       }
       if (
         /from "research_companies"/i.test(query) &&
@@ -1012,6 +1051,85 @@ function publicationDatabase(input: {
   };
 }
 
+function statefulPublicationDatabase() {
+  const operations: string[] = [];
+  const state = {
+    jobStatus: "running" as "running" | "succeeded",
+    snapshotId: undefined as number | undefined,
+    snapshotInsertions: 0,
+    sourceInsertions: 0,
+    completionMutations: 0,
+    jobLocks: 0,
+    companyLocks: 0,
+  };
+  const tx = {
+    execute: async (statement: SQL) => {
+      const query = compiled(statement).sql;
+      if (/"job_id" =/i.test(query)) {
+        operations.push("find-job-snapshot");
+        return { rows: state.snapshotId ? [{ id: state.snapshotId }] : [] };
+      }
+      if (
+        /from "research_automation_jobs"/i.test(query) &&
+        /for update/i.test(query)
+      ) {
+        operations.push("lock-job");
+        state.jobLocks += 1;
+        return { rows: state.jobStatus === "running" ? [{ id: 9 }] : [] };
+      }
+      if (
+        /from "research_companies"/i.test(query) &&
+        /for update/i.test(query)
+      ) {
+        operations.push("lock-company");
+        state.companyLocks += 1;
+        return { rows: [{ id: 7 }] };
+      }
+      if (/"content_hash" =/i.test(query)) {
+        operations.push("find-content-snapshot");
+        return { rows: [] };
+      }
+      if (/order by "version" desc/i.test(query)) {
+        operations.push("read-latest-version");
+        return { rows: [] };
+      }
+      if (/update "research_automation_jobs"/i.test(query)) {
+        operations.push("complete-job");
+        state.completionMutations += 1;
+        if (state.jobStatus !== "running") return { rows: [] };
+        state.jobStatus = "succeeded";
+        return { rows: [{ id: 9 }] };
+      }
+      throw new Error(`Unexpected stateful publication SQL: ${query}`);
+    },
+    insert: (table: unknown) => ({
+      values: (_values: unknown) => {
+        if (table === automatedResearchSnapshotsTable) {
+          operations.push("insert-snapshot");
+          state.snapshotInsertions += 1;
+          state.snapshotId = 77;
+          return { returning: async () => [{ id: 77 }] };
+        }
+        if (table === automatedResearchSourcesTable) {
+          operations.push("insert-sources");
+          state.sourceInsertions += 1;
+          return Promise.resolve();
+        }
+        throw new Error("Unexpected stateful publication table");
+      },
+    }),
+  };
+  return {
+    database: {
+      transaction: async <T>(
+        operation: (transaction: typeof tx) => Promise<T>,
+      ) => operation(tx),
+    },
+    operations,
+    state,
+  };
+}
+
 test("repository review: publish locks job then company before version allocation", async () => {
   const fake = publicationDatabase({});
   const repository = new ResearchAutomationRepository(fake.database as never);
@@ -1026,9 +1144,9 @@ test("repository review: publish locks job then company before version allocatio
 
   assert.equal(snapshotId, 77);
   assert.deepEqual(fake.operations, [
+    "find-job-snapshot",
     "lock-job",
     "lock-company",
-    "find-job-snapshot",
     "find-content-snapshot",
     "read-latest-version",
     "insert-snapshot",
@@ -1037,7 +1155,7 @@ test("repository review: publish locks job then company before version allocatio
   assert.equal(fake.insertedSnapshot()?.version, 4);
 });
 
-test("repository review: duplicate job publication completes without a second snapshot", async () => {
+test("repository review: an existing job snapshot returns without lease or completion mutation", async () => {
   const fake = publicationDatabase({ existingJobSnapshotId: 41 });
   const repository = new ResearchAutomationRepository(fake.database as never);
   const fixture = publicationFixture();
@@ -1050,12 +1168,7 @@ test("repository review: duplicate job publication completes without a second sn
   );
 
   assert.equal(snapshotId, 41);
-  assert.deepEqual(fake.operations, [
-    "lock-job",
-    "lock-company",
-    "find-job-snapshot",
-    "complete-job",
-  ]);
+  assert.deepEqual(fake.operations, ["find-job-snapshot"]);
 });
 
 test("repository review: duplicate content completes without corrupting version history", async () => {
@@ -1072,12 +1185,75 @@ test("repository review: duplicate content completes without corrupting version 
 
   assert.equal(snapshotId, 44);
   assert.deepEqual(fake.operations, [
+    "find-job-snapshot",
     "lock-job",
     "lock-company",
-    "find-job-snapshot",
     "find-content-snapshot",
     "complete-job",
   ]);
+});
+
+test("repository review: a lost-response retry returns the committed snapshot read-only", async () => {
+  const fake = statefulPublicationDatabase();
+  const repository = new ResearchAutomationRepository(fake.database as never);
+  const fixture = publicationFixture();
+  const bundle = {
+    ...fixture.bundle,
+    sources: [
+      {
+        citationKey: "issuer-filing",
+        authority: "primary" as const,
+        sourceType: "issuer_filing",
+        title: "Issuer filing",
+        publisher: "Issuer",
+        canonicalUrl: "https://issuer.example/filing",
+        publishedAt: firstRunAt,
+        retrievedAt: firstRunAt,
+        evidenceSummary: "Primary evidence.",
+        contentFingerprint: "b".repeat(64),
+      },
+    ],
+  };
+
+  const firstId = await repository.publishSnapshot(
+    fixture.job,
+    bundle,
+    fixture.validation,
+    fixture.fence,
+  );
+  const secondId = await repository.publishSnapshot(
+    fixture.job,
+    bundle,
+    fixture.validation,
+    fixture.fence,
+  );
+
+  assert.equal(firstId, 77);
+  assert.equal(secondId, 77);
+  assert.equal(fake.state.jobStatus, "succeeded");
+  assert.equal(fake.state.snapshotInsertions, 1);
+  assert.equal(fake.state.sourceInsertions, 1);
+  assert.equal(fake.state.completionMutations, 1);
+  assert.equal(fake.state.jobLocks, 1);
+  assert.equal(fake.state.companyLocks, 1);
+  assert.deepEqual(fake.operations.slice(-1), ["find-job-snapshot"]);
+});
+
+test("repository review: stale worker without a snapshot fails before company mutation", async () => {
+  const fake = publicationDatabase({ jobLeaseOwned: false });
+  const repository = new ResearchAutomationRepository(fake.database as never);
+  const fixture = publicationFixture();
+
+  await assert.rejects(
+    repository.publishSnapshot(
+      fixture.job,
+      fixture.bundle,
+      fixture.validation,
+      fixture.fence,
+    ),
+    /lease is no longer owned/i,
+  );
+  assert.deepEqual(fake.operations, ["find-job-snapshot", "lock-job"]);
 });
 
 test("repository: refresh buckets follow holding, local-day, four-hour, and fifteen-minute policies", () => {

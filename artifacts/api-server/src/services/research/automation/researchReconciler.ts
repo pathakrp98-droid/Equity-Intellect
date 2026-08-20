@@ -277,14 +277,37 @@ export async function reconcilePortfolioHoldings(
       existingTargets.map((target) => [normalizeTicker(target.ticker), target]),
     );
     const seenTickers = new Set<string>();
-
+    const preparedHoldings: Array<{
+      rawHolding: ReconciliationHolding;
+      holding: ReconciliationHolding;
+      ticker: string;
+      classified: ReturnType<typeof classificationFor>;
+    }> = [];
     for (const rawHolding of holdings) {
       const ticker = normalizeTicker(rawHolding.ticker);
       if (seenTickers.has(ticker)) continue;
       seenTickers.add(ticker);
       const holding = { ...rawHolding, ticker };
       const classified = classificationFor(holding);
-      await tx.lockIdentity(classified.normalizedIdentityKey);
+      preparedHoldings.push({ rawHolding, holding, ticker, classified });
+    }
+    const normalizedIdentityKeys = [
+      ...new Set(
+        preparedHoldings.map(
+          ({ classified }) => classified.normalizedIdentityKey,
+        ),
+      ),
+    ].sort();
+    for (const normalizedIdentityKey of normalizedIdentityKeys) {
+      await tx.lockIdentity(normalizedIdentityKey);
+    }
+
+    for (const {
+      rawHolding,
+      holding,
+      ticker,
+      classified,
+    } of preparedHoldings) {
       let company = await tx.findCompany({
         normalizedIdentityKey: classified.normalizedIdentityKey,
         ticker,

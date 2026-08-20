@@ -877,6 +877,17 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
     fence: PublishSnapshotFence,
   ): Promise<number> {
     return this.database.transaction(async (tx) => {
+      const existingForJob = resultRows<{ id: number }>(
+        await tx.execute(
+          buildSnapshotByJobStatement({
+            userId: job.userId,
+            companyId: job.companyId,
+            jobId: job.id,
+          }),
+        ),
+      )[0];
+      if (existingForJob) return Number(existingForJob.id);
+
       const lease = {
         userId: job.userId,
         jobId: job.id,
@@ -905,20 +916,6 @@ export class ResearchAutomationRepository implements ReconciliationRepository {
           throw new Error("Research job lease is no longer owned");
         }
       };
-
-      const existingForJob = resultRows<{ id: number }>(
-        await tx.execute(
-          buildSnapshotByJobStatement({
-            userId: job.userId,
-            companyId: job.companyId,
-            jobId: job.id,
-          }),
-        ),
-      )[0];
-      if (existingForJob) {
-        await completeJob();
-        return Number(existingForJob.id);
-      }
 
       const existingForContent = resultRows<{ id: number }>(
         await tx.execute(
