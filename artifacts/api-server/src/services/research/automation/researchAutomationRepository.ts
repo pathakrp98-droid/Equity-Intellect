@@ -295,7 +295,7 @@ export function buildRequeueExpiredJobsStatement(now: Date): SQL {
         "worker_id" = null,
         "lease_expires_at" = null,
         "run_after" = case when "attempts" >= "max_attempts" then "run_after" else ${now} end,
-        "completed_at" = case when "attempts" >= "max_attempts" then ${now} else null end,
+        "completed_at" = case when "attempts" >= "max_attempts" then ${now}::timestamptz else null end,
         "updated_at" = ${now}
     where "status" = 'running'
       and "lease_expires_at" <= ${now}
