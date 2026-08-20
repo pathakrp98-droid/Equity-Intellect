@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS = [
   { href: "/", label: "Morning Brief", icon: LayoutDashboard },
   { href: "/portfolio", label: "Portfolio", icon: PieChart },
-  { href: "/research", label: "Research Terminal", icon: LineChart },
+  { href: "/research", label: "Research", icon: LineChart },
   { href: "/market-intelligence", label: "Market Intelligence", icon: Globe2 },
   { href: "/copilot", label: "AI Copilot", icon: Bot },
   { href: "/alerts", label: "Alerts", icon: Bell, badge: true },

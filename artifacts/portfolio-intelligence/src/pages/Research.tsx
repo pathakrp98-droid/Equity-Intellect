@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   BookOpen,
   BriefcaseBusiness,
   CheckCircle2,
@@ -18,7 +19,6 @@ import {
   Pin,
   Plus,
   Save,
-  Search,
   ShieldAlert,
   Sparkles,
   Target,
@@ -45,7 +45,6 @@ import {
   useDeleteResearchNote,
   useDeleteRisk,
   useDeleteValuationAssumption,
-  useResearchCompanies,
   useResearchWorkspace,
   useSaveThesis,
   useUpdateResearchCompany,
@@ -53,7 +52,6 @@ import {
   type InvalidationInput,
   type InvestmentThesis,
   type NoteInput,
-  type ResearchCompanySummary,
   type ResearchConviction,
   type ResearchImpact,
   type ResearchNoteCategory,
@@ -65,6 +63,13 @@ import {
   type ThesisStatus,
   type ValuationAssumptionInput,
 } from "@/features/research/api";
+import {
+  useAutomatedResearchCoverage,
+  useAutomatedResearchHistory,
+} from "@/features/research/automationApi";
+import { AutomatedResearchPanel } from "@/features/research/components/AutomatedResearchPanel";
+import { ResearchCoverageList } from "@/features/research/components/ResearchCoverageList";
+import { ResearchHistoryPanel } from "@/features/research/components/ResearchHistoryPanel";
 import { cn } from "@/lib/utils";
 
 const moneyFormatter = new Intl.NumberFormat("en-IN", {
@@ -239,13 +244,7 @@ export function Research() {
         ?.toUpperCase() ?? null,
   );
   const [showAdd, setShowAdd] = useState(false);
-  const companies = useResearchCompanies(search);
-
-  useEffect(() => {
-    if (!selectedTicker && companies.data?.length) {
-      setSelectedTicker(companies.data[0].ticker);
-    }
-  }, [companies.data, selectedTicker]);
+  const coverage = useAutomatedResearchCoverage(search);
 
   function selectTicker(ticker: string) {
     setSelectedTicker(ticker);
@@ -254,14 +253,21 @@ export function Research() {
     window.history.replaceState({}, "", url);
   }
 
-  if (companies.isError) {
+  function clearSelection() {
+    setSelectedTicker(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("ticker");
+    window.history.replaceState({}, "", url);
+  }
+
+  if (coverage.isError) {
     return (
       <Card className="max-w-2xl border-amber-500/30 bg-amber-500/5">
         <CardContent className="space-y-3 p-8">
           <AlertTriangle className="h-9 w-9 text-amber-500" />
-          <h1 className="text-2xl font-semibold">Research Engine</h1>
+          <h1 className="text-2xl font-semibold">Research</h1>
           <p className="text-sm text-muted-foreground">
-            {errorMessage(companies.error)}
+            {errorMessage(coverage.error)}
           </p>
         </CardContent>
       </Card>
@@ -269,7 +275,7 @@ export function Research() {
   }
 
   const selected =
-    companies.data?.find((company) => company.ticker === selectedTicker) ??
+    coverage.data?.find((company) => company.ticker === selectedTicker) ??
     null;
 
   return (
@@ -277,12 +283,12 @@ export function Research() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            <Sparkles className="h-3.5 w-3.5" /> AlphaDesk Phase 2
+            <Sparkles className="h-3.5 w-3.5" /> Evidence-backed portfolio research
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Research Engine</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Research</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Turn every holding and watchlist idea into a documented, reviewable
-            investment thesis.
+            AlphaDesk reviews every holding automatically and clearly separates
+            sourced facts from AI judgements.
           </p>
         </div>
         <Button onClick={() => setShowAdd((value) => !value)}>
@@ -294,68 +300,96 @@ export function Research() {
         <AddCompanyCard
           onCreated={(ticker) => {
             setShowAdd(false);
+            setSearch("");
             selectTicker(ticker);
           }}
           onCancel={() => setShowAdd(false)}
         />
       ) : null}
 
-      <div className="grid min-h-[680px] gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b bg-secondary/20 p-4">
-            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
-              Coverage universe
-            </CardTitle>
-            <div className="relative pt-2">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-[25%] text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Search ticker, company or sector"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-          </CardHeader>
-          <CardContent className="max-h-[720px] space-y-1 overflow-y-auto p-2">
-            {companies.isLoading
-              ? Array.from({ length: 7 }).map((_, index) => (
-                  <Skeleton key={index} className="h-24 w-full" />
-                ))
-              : companies.data?.map((company) => (
-                  <CompanyListItem
-                    key={company.ticker}
-                    company={company}
-                    selected={company.ticker === selectedTicker}
-                    onClick={() => selectTicker(company.ticker)}
-                  />
-                ))}
-            {!companies.isLoading && companies.data?.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                No matching companies. Add a company or import holdings in the
-                Portfolio Engine.
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className={cn(selectedTicker && "hidden xl:block")}>
+          <ResearchCoverageList
+            coverage={coverage.data}
+            isLoading={coverage.isLoading}
+            search={search}
+            onSearch={setSearch}
+            selectedTicker={selectedTicker}
+            onSelect={selectTicker}
+          />
+        </div>
 
-        <div className="min-w-0">
-          {!selectedTicker ? (
-            <Card className="flex min-h-[680px] items-center justify-center">
-              <CardContent className="text-center">
+        <div className={cn("min-w-0", !selectedTicker && "hidden xl:block")}>
+          {selected ? (
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                className="-ml-2 xl:hidden"
+                onClick={clearSelection}
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back to all investments
+              </Button>
+              <Tabs
+                key={selected.ticker}
+                defaultValue={selected.isHolding ? "alphadesk" : "your"}
+              >
+                <TabsList className="grid h-auto w-full grid-cols-3 bg-secondary/60 p-1">
+                  <TabsTrigger
+                    className="whitespace-normal py-2"
+                    value="alphadesk"
+                  >
+                    AlphaDesk research
+                  </TabsTrigger>
+                  <TabsTrigger className="whitespace-normal py-2" value="your">
+                    Your research
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="whitespace-normal py-2"
+                    value="history"
+                  >
+                    History
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="alphadesk" className="mt-4">
+                  <AutomatedResearchPanel
+                    coverage={selected}
+                    onIdentityCorrected={(ticker) => {
+                      setSearch("");
+                      selectTicker(ticker);
+                    }}
+                  />
+                </TabsContent>
+                <TabsContent value="your" className="mt-4">
+                  {selected.isCovered ? (
+                    <CompanyWorkspace ticker={selected.ticker} />
+                  ) : (
+                    <Card>
+                      <CardContent className="p-8 text-center text-sm text-muted-foreground">
+                        Your editable research workspace will appear after this
+                        holding has been reconciled. Automatic coverage does not
+                        require transaction history or manual setup.
+                      </CardContent>
+                    </Card>
+                  )}
+                </TabsContent>
+                <TabsContent value="history" className="mt-4">
+                  <AutomatedHistory
+                    ticker={selected.id ? selected.ticker : null}
+                  />
+                </TabsContent>
+              </Tabs>
+            </div>
+          ) : (
+            <Card className="flex min-h-[480px] items-center justify-center">
+              <CardContent className="max-w-sm text-center">
                 <BookOpen className="mx-auto h-10 w-10 text-muted-foreground" />
-                <h2 className="mt-4 text-lg font-semibold">Choose a company</h2>
+                <h2 className="mt-4 text-lg font-semibold">Choose an investment</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Select a holding or add a coverage company to start research.
+                  Select a holding to review its latest evidence, AI judgements,
+                  risks and research history.
                 </p>
               </CardContent>
             </Card>
-          ) : selected && !selected.isCovered ? (
-            <StartCoverage
-              company={selected}
-              onStarted={() => selectTicker(selected.ticker)}
-            />
-          ) : (
-            <CompanyWorkspace ticker={selectedTicker} />
           )}
         </div>
       </div>
@@ -363,56 +397,22 @@ export function Research() {
   );
 }
 
-function CompanyListItem({
-  company,
-  selected,
-  onClick,
-}: {
-  company: ResearchCompanySummary;
-  selected: boolean;
-  onClick: () => void;
-}) {
+function AutomatedHistory({ ticker }: { ticker: string | null }) {
+  const history = useAutomatedResearchHistory(ticker);
+  if (history.isError) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-sm text-destructive">
+          {errorMessage(history.error)}
+        </CardContent>
+      </Card>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "w-full rounded-lg border p-3 text-left transition-colors",
-        selected
-          ? "border-primary/40 bg-primary/10"
-          : "border-transparent hover:border-border hover:bg-secondary/40",
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-bold">{company.ticker}</span>
-            {company.isHolding ? (
-              <BriefcaseBusiness
-                className="h-3.5 w-3.5 text-primary"
-                aria-label="Portfolio holding"
-              />
-            ) : null}
-          </div>
-          <p className="truncate text-xs text-muted-foreground">
-            {company.name}
-          </p>
-        </div>
-        <StatusPill value={company.conviction} kind="conviction" />
-      </div>
-      <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-        <StatusPill value={company.thesisStatus} />
-        <span>{company.completenessScore}% complete</span>
-      </div>
-      <div className="mt-2">
-        <ProgressBar value={company.completenessScore} />
-      </div>
-      {!company.isCovered ? (
-        <p className="mt-2 text-[11px] font-medium text-amber-500">
-          Holding not yet covered
-        </p>
-      ) : null}
-    </button>
+    <ResearchHistoryPanel
+      history={history.data}
+      isLoading={history.isLoading}
+    />
   );
 }
 
@@ -523,75 +523,10 @@ function AddCompanyCard({
               {create.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
-              Start coverage
+              Add company
             </Button>
           </div>
         </form>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StartCoverage({
-  company,
-  onStarted,
-}: {
-  company: ResearchCompanySummary;
-  onStarted: () => void;
-}) {
-  const create = useCreateResearchCompany();
-  return (
-    <Card className="flex min-h-[680px] items-center justify-center border-amber-500/30 bg-amber-500/5">
-      <CardContent className="max-w-lg p-8 text-center">
-        <BriefcaseBusiness className="mx-auto h-12 w-12 text-amber-500" />
-        <h2 className="mt-4 text-2xl font-semibold">
-          Start coverage for {company.ticker}
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This portfolio holding is not yet connected to a research record.
-          Starting coverage will preserve its ticker, company name, sector and
-          current portfolio context.
-        </p>
-        <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
-          <Metric label="Position" value={money(company.marketValue)} />
-          <Metric
-            label="Allocation"
-            value={`${company.allocationPct.toFixed(1)}%`}
-          />
-          <Metric
-            label="Quantity"
-            value={company.quantity.toLocaleString("en-IN")}
-          />
-        </div>
-        {create.isError ? (
-          <p className="mt-4 text-sm text-destructive">
-            {errorMessage(create.error)}
-          </p>
-        ) : null}
-        <Button
-          className="mt-6"
-          disabled={create.isPending}
-          onClick={() =>
-            create.mutate(
-              {
-                ticker: company.ticker,
-                name: company.name,
-                exchange: company.exchange,
-                sector: company.sector,
-                currentPrice: company.currentPrice,
-                previousClose: company.previousClose,
-              },
-              { onSuccess: onStarted },
-            )
-          }
-        >
-          {create.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <BookOpen className="mr-2 h-4 w-4" />
-          )}
-          Create research workspace
-        </Button>
       </CardContent>
     </Card>
   );
@@ -643,7 +578,7 @@ function CompanyWorkspace({ ticker }: { ticker: string }) {
                 .join(" · ") || "Sector not classified"}
             </p>
           </div>
-          <div className="grid min-w-[320px] grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-4 lg:w-auto">
             <Metric label="Price" value={money(price)} />
             <Metric label="Base value" value={money(basePrice)} />
             <Metric
@@ -656,7 +591,7 @@ function CompanyWorkspace({ ticker }: { ticker: string }) {
               tone={upside !== null && upside >= 0 ? "positive" : "negative"}
             />
             <Metric
-              label="Completeness"
+              label="Your research"
               value={`${data.completeness.score}%`}
             />
           </div>
@@ -665,7 +600,7 @@ function CompanyWorkspace({ ticker }: { ticker: string }) {
           <div>
             <div className="mb-2 flex items-center justify-between text-xs">
               <span className="text-muted-foreground">
-                Research completeness
+                Your research completeness
               </span>
               <span className="font-medium capitalize">
                 {data.completeness.band.replaceAll("_", " ")}
@@ -684,8 +619,8 @@ function CompanyWorkspace({ ticker }: { ticker: string }) {
       </div>
 
       <Tabs defaultValue="thesis" className="w-full">
-        <div className="overflow-x-auto border-b px-4">
-          <TabsList className="h-12 min-w-[720px] justify-start bg-transparent">
+        <div className="border-b px-4">
+          <TabsList className="h-auto w-full flex-wrap justify-start bg-transparent py-1">
             <TabsTrigger value="thesis">Thesis</TabsTrigger>
             <TabsTrigger value="notes">
               Research notes ({data.notes.length})
