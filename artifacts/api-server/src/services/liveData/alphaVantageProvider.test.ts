@@ -4,7 +4,6 @@ import test from "node:test";
 import { AlphaVantageProvider } from "./alphaVantageProvider";
 
 const originalFetch = globalThis.fetch;
-const originalKey = process.env.ALPHA_VANTAGE_API_KEY;
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), {
@@ -13,17 +12,23 @@ function jsonResponse(value: unknown): Response {
   });
 }
 
-test("Alpha Vantage quote mapping preserves portfolio ticker", async () => {
-  process.env.ALPHA_VANTAGE_API_KEY = "test-key";
+test("Yahoo quote mapping preserves the portfolio ticker", async () => {
   globalThis.fetch = async () =>
     jsonResponse({
-      "Global Quote": {
-        "01. symbol": "INFY.BSE",
-        "05. price": "1500.00",
-        "08. previous close": "1480.00",
-        "09. change": "20.00",
-        "10. change percent": "1.3514%",
-        "07. latest trading day": "2026-07-18",
+      chart: {
+        result: [
+          {
+            meta: {
+              symbol: "INFY.NS",
+              regularMarketPrice: 1500,
+              chartPreviousClose: 1480,
+              regularMarketTime: 1784419200,
+              currency: "INR",
+              exchangeName: "NSE",
+            },
+          },
+        ],
+        error: null,
       },
     });
   try {
@@ -39,7 +44,48 @@ test("Alpha Vantage quote mapping preserves portfolio ticker", async () => {
     assert.equal(quotes[0].metadata?.previousClose, 1480);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.ALPHA_VANTAGE_API_KEY;
-    else process.env.ALPHA_VANTAGE_API_KEY = originalKey;
+  }
+});
+
+test("quote fetching uses bounded symbol concurrency", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  globalThis.fetch = async (input) => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active -= 1;
+    const symbol = String(input).split("/").pop()?.split("?")[0] ?? "TEST.NS";
+    return jsonResponse({
+      chart: {
+        result: [
+          {
+            meta: {
+              symbol,
+              regularMarketPrice: 100,
+              chartPreviousClose: 98,
+              regularMarketTime: 1784419200,
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+  };
+  try {
+    const provider = new AlphaVantageProvider();
+    const quotes = await provider.fetchQuotes!({
+      symbols: Array.from({ length: 9 }, (_, index) => ({
+        ticker: `TEST${index}`,
+        exchange: "NSE",
+        providerSymbol: `TEST${index}.NS`,
+      })),
+      now: new Date("2026-07-19T00:00:00Z"),
+    });
+    assert.equal(quotes.length, 9);
+    assert.ok(maximumActive > 1);
+    assert.ok(maximumActive <= 4);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

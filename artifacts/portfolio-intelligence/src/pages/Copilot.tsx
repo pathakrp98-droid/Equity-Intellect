@@ -62,7 +62,7 @@ const MODE_OPTIONS: ModeOption[] = [
   {
     value: "portfolio_review",
     label: "Portfolio review",
-    description: "Review allocation, cash, concentration and current risks.",
+    description: "Review allocation, concentration and current risks.",
     icon: ShieldAlert,
   },
   {
@@ -107,7 +107,7 @@ const SUGGESTIONS: Array<{
     label: "Morning portfolio review",
     mode: "portfolio_review",
     question:
-      "Review my portfolio as it stands today. Highlight concentration, cash, the largest risks and the three decisions that deserve attention.",
+      "Review my portfolio as it stands today. Highlight concentration, the largest risks and the three decisions that deserve attention.",
   },
   {
     label: "Explain performance",

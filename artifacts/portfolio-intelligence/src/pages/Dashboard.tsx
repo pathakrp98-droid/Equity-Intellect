@@ -7,6 +7,7 @@ import {
   CloudOff,
   Database,
   ExternalLink,
+  Newspaper,
   RefreshCw,
   ShieldAlert,
   Sparkles,
@@ -59,6 +60,10 @@ function priorityClass(priority: "high" | "medium" | "low") {
       : "border-blue-500/30 bg-blue-500/5 text-blue-500";
 }
 
+function isVisibleRiskText(value: string): boolean {
+  return !/\bcash(?:\s+buffer)?\b/i.test(value);
+}
+
 export function Dashboard() {
   const [, navigate] = useLocation();
   const briefQuery = useLatestMorningBrief();
@@ -67,6 +72,12 @@ export function Dashboard() {
   const refreshMarket = useRefreshMarketIntelligence();
   const systemQuery = useIntegrationHealth();
   const brief = briefQuery.data;
+  const visibleGuardianRisks =
+    brief?.portfolioPulse.guardian?.topRisks.filter(isVisibleRiskText) ?? [];
+  const visibleBriefRisks =
+    brief?.risks.filter((risk) =>
+      isVisibleRiskText(`${risk.title} ${risk.detail}`),
+    ) ?? [];
   const busy = generateBrief.isPending || refreshMarket.isPending;
 
   const refreshAndGenerate = async () => {
@@ -227,11 +238,157 @@ export function Dashboard() {
             />
           </div>
 
+          {brief.portfolioPulse.changeSincePrevious?.previousBriefDate && (
+            <Card className="border-blue-500/20 bg-blue-500/5">
+              <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+                    Since the previous brief
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {brief.portfolioPulse.changeSincePrevious.summary}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <ChangePill
+                    label="Value"
+                    value={
+                      brief.portfolioPulse.changeSincePrevious
+                        .portfolioValueChange
+                    }
+                    money
+                  />
+                  <ChangePill
+                    label="Day P&L"
+                    value={
+                      brief.portfolioPulse.changeSincePrevious.dailyPnlChange
+                    }
+                    money
+                  />
+                  <ChangePill
+                    label="Concentration"
+                    value={
+                      brief.portfolioPulse.changeSincePrevious
+                        .largestPositionPctChange
+                    }
+                    suffix=" pts"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             <Card className="xl:col-span-2">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="h-4 w-4 text-primary" /> Priority actions
+                  <TrendingUp className="h-4 w-4 text-primary" /> Biggest movers
+                  & portfolio impact
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(brief.portfolioPulse.movers ?? []).length === 0 ? (
+                  <EmptyLine text="No current holding moves are available." />
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(brief.portfolioPulse.movers ?? []).map((move) => (
+                      <button
+                        type="button"
+                        key={move.ticker}
+                        onClick={() =>
+                          navigate(`/research?ticker=${move.ticker}`)
+                        }
+                        className="rounded-lg border bg-secondary/15 p-3 text-left transition-colors hover:bg-secondary/40"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold">{move.ticker}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {move.name}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "font-mono text-sm font-semibold",
+                              move.dayChangePct >= 0
+                                ? "text-emerald-500"
+                                : "text-destructive",
+                            )}
+                          >
+                            {formatPct(move.dayChangePct)}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Day P&L {formatCurrency(move.dayPnl)}</span>
+                          <span>{formatPct(move.contributionPct)} impact</span>
+                        </div>
+                        {move.priceStatus !== "fresh" && (
+                          <p className="mt-2 text-[11px] text-amber-500">
+                            {move.priceStatus} {move.priceSource} price
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldAlert className="h-4 w-4 text-primary" /> Guardian
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {brief.portfolioPulse.guardian ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/guardrails")}
+                      className="flex w-full items-center justify-between rounded-lg border bg-secondary/15 p-4 text-left"
+                    >
+                      <div>
+                        <p className="text-3xl font-bold">
+                          {brief.portfolioPulse.guardian.score}
+                        </p>
+                        <p className="text-xs capitalize text-muted-foreground">
+                          {brief.portfolioPulse.guardian.band.replaceAll(
+                            "_",
+                            " ",
+                          )}
+                        </p>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-primary" />
+                    </button>
+                    {visibleGuardianRisks.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No Guardian warnings need attention.
+                      </p>
+                    ) : (
+                      visibleGuardianRisks.slice(0, 4).map((risk) => (
+                        <p
+                          key={risk}
+                          className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-xs text-amber-200"
+                        >
+                          {risk}
+                        </p>
+                      ))
+                    )}
+                  </>
+                ) : (
+                  <EmptyLine text="Guardian health is not available for this brief." />
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <Card className="xl:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkles className="h-4 w-4 text-primary" /> Needs attention
+                  today
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -262,10 +419,10 @@ export function Dashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {brief.risks.length === 0 ? (
+                {visibleBriefRisks.length === 0 ? (
                   <EmptyLine text="No material risks were surfaced." />
                 ) : (
-                  brief.risks
+                  visibleBriefRisks
                     .slice(0, 6)
                     .map((risk) => <RiskRow key={risk.id} risk={risk} />)
                 )}
@@ -273,7 +430,7 @@ export function Dashboard() {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Market pulse</CardTitle>
@@ -318,6 +475,57 @@ export function Dashboard() {
                     ))
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Newspaper className="h-4 w-4 text-primary" /> Company news
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {(brief.marketPulse.materialNews ?? []).length === 0 ? (
+                  <EmptyLine text="No material portfolio news is available." />
+                ) : (
+                  (brief.marketPulse.materialNews ?? []).map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border bg-secondary/15 p-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        {item.ticker && (
+                          <span className="font-bold text-foreground">
+                            {item.ticker}
+                          </span>
+                        )}
+                        <span className="capitalize">{item.sentiment}</span>
+                        <span>{relativeTime(item.publishedAt)}</span>
+                      </div>
+                      <p className="mt-2 text-sm font-medium">
+                        {item.headline}
+                      </p>
+                      {item.summary && (
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {item.summary}
+                        </p>
+                      )}
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>{item.source}</span>
+                        {item.sourceUrl && (
+                          <a
+                            href={item.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            Source <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -411,6 +619,37 @@ function MetricCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ChangePill({
+  label,
+  value,
+  money = false,
+  suffix = "",
+}: {
+  label: string;
+  value: number | null;
+  money?: boolean;
+  suffix?: string;
+}) {
+  if (value === null) return null;
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-2.5 py-1 font-mono",
+        value > 0
+          ? "border-emerald-500/30 text-emerald-500"
+          : value < 0
+            ? "border-destructive/30 text-destructive"
+            : "text-muted-foreground",
+      )}
+    >
+      {label}{" "}
+      {money
+        ? formatCurrency(value)
+        : `${value >= 0 ? "+" : ""}${value.toFixed(2)}${suffix}`}
+    </span>
   );
 }
 

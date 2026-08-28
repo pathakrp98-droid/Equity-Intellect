@@ -12,6 +12,7 @@ export interface CompletenessThesis {
   conviction?: string | null;
   status?: string | null;
   valuationMethodology?: string | null;
+  targetPrice?: number | null;
   bullPrice?: number | null;
   basePrice?: number | null;
   bearPrice?: number | null;
@@ -118,7 +119,8 @@ export function calculateResearchCompleteness(
 
   let valuationScore = 0;
   if (hasText(thesis?.valuationMethodology, 10)) valuationScore += 5;
-  if (typeof thesis?.basePrice === "number" && thesis.basePrice > 0)
+  const centralTarget = thesis?.basePrice ?? thesis?.targetPrice;
+  if (typeof centralTarget === "number" && centralTarget > 0)
     valuationScore += 4;
   if (typeof thesis?.bullPrice === "number" && thesis.bullPrice > 0)
     valuationScore += 3;

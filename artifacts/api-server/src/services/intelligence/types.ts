@@ -19,11 +19,7 @@ export type MarketEventType =
 
 export type MarketImpact = "critical" | "high" | "medium" | "low";
 export type MarketSentiment =
-  | "positive"
-  | "negative"
-  | "neutral"
-  | "mixed"
-  | "unknown";
+  "positive" | "negative" | "neutral" | "mixed" | "unknown";
 
 export interface MarketPointInput {
   kind: MarketDataKind;
@@ -87,7 +83,10 @@ export interface NormalizedMarketPoint extends Omit<MarketPointInput, "asOf"> {
   metadata: Record<string, unknown>;
 }
 
-export interface NormalizedMarketNews extends Omit<MarketNewsInput, "publishedAt"> {
+export interface NormalizedMarketNews extends Omit<
+  MarketNewsInput,
+  "publishedAt"
+> {
   externalId: string;
   ticker: string | null;
   headline: string;
@@ -101,7 +100,10 @@ export interface NormalizedMarketNews extends Omit<MarketNewsInput, "publishedAt
   metadata: Record<string, unknown>;
 }
 
-export interface NormalizedMarketEvent extends Omit<MarketEventInput, "eventAt"> {
+export interface NormalizedMarketEvent extends Omit<
+  MarketEventInput,
+  "eventAt"
+> {
   externalId: string;
   ticker: string | null;
   companyName: string | null;
@@ -138,6 +140,8 @@ export interface BriefHolding {
   unrealizedPnl: number;
   unrealizedPnlPct: number;
   priceSource: string;
+  priceStatus?: "fresh" | "stale" | "missing";
+  priceAsOf?: Date | null;
 }
 
 export interface BriefPortfolioSnapshot {

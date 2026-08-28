@@ -82,6 +82,7 @@ function snapshot(
 test("classification uses holding identity evidence without guessing", () => {
   assert.equal(classifySecurity({ ticker: "RELIANCE", name: "Reliance Industries", exchange: "NSE", isin: "INE002A01018" }).securityType, "equity");
   assert.equal(classifySecurity({ ticker: "NIFTYBEES", name: "Nippon India ETF Nifty BeES", exchange: "NSE", isin: null }).securityType, "etf");
+  assert.equal(classifySecurity({ ticker: "NIFTYBEES", name: "Nippon India ETF Nifty BeES", exchange: "NSE", isin: "INF204KB14I2" }).securityType, "etf");
   assert.equal(classifySecurity({ ticker: "LIQUIDCASE", name: "Zerodha Nifty 1D Rate Liquid ETF", exchange: "NSE", isin: null }).securityType, "etf");
   assert.equal(classifySecurity({ ticker: "SBIFUNDS", name: "SBI Funds Management Limited", exchange: "UNLISTED", isin: "INE640G01020" }).securityType, "unlisted");
   assert.equal(classifySecurity({ ticker: "UNKNOWN1", name: "Unknown security", exchange: "NSE", isin: null }).securityType, "unknown");

@@ -8,8 +8,9 @@ import {
   marketNewsTable,
   marketProviderRunsTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 
+import { alertService } from "../alerts/alertService";
 import { marketIntelligenceService } from "../intelligence/marketIntelligenceService";
 import type {
   MarketEventInput,
@@ -50,7 +51,26 @@ export interface UpsertSymbolMappingInput {
   isEnabled?: boolean;
 }
 
-type Capability = "snapshot" | "quotes" | "news" | "calendar" | "corporateActions";
+type Capability =
+  "snapshot" | "quotes" | "news" | "calendar" | "corporateActions";
+
+export type DailyRefreshResult =
+  | {
+      attempted: false;
+      reason: "no_provider_configured" | "already_refreshed_today";
+    }
+  | {
+      attempted: true;
+      refreshedAt: Date;
+      diagnostics: ProviderRefreshDiagnostic[];
+      alertEvaluation?: {
+        evaluatedAt: Date;
+        candidates: number;
+        alertsUpserted: number;
+      };
+    };
+
+const dailyRefreshInFlight = new Map<string, Promise<DailyRefreshResult>>();
 
 function normalizeTicker(value: string): string {
   const ticker = value.trim().toUpperCase();
@@ -74,7 +94,8 @@ function boundedInteger(
   maximum: number,
 ): number | undefined {
   if (value === undefined) return undefined;
-  if (!Number.isFinite(value)) throw new Error("Preference value must be numeric");
+  if (!Number.isFinite(value))
+    throw new Error("Preference value must be numeric");
   return Math.max(minimum, Math.min(maximum, Math.round(value)));
 }
 
@@ -83,23 +104,73 @@ function jsonClone<T>(value: T): T {
 }
 
 class LiveDataService {
-  async refreshDaily(userId: string) {
+  async refreshDaily(userId: string): Promise<DailyRefreshResult> {
+    const existing = dailyRefreshInFlight.get(userId);
+    if (existing) return existing;
+    const refreshPromise = this.runDailyRefresh(userId).finally(() => {
+      dailyRefreshInFlight.delete(userId);
+    });
+    dailyRefreshInFlight.set(userId, refreshPromise);
+    return refreshPromise;
+  }
+
+  private async runDailyRefresh(userId: string): Promise<DailyRefreshResult> {
     if (!listLiveDataProviders().some((provider) => provider.isConfigured())) {
       return { attempted: false, reason: "no_provider_configured" as const };
     }
-    const [latestRun] = await db
-      .select({ startedAt: marketProviderRunsTable.startedAt })
+    const recentSuccessfulRuns = await db
+      .select({
+        startedAt: marketProviderRunsTable.startedAt,
+        metadata: marketProviderRunsTable.metadata,
+      })
       .from(marketProviderRunsTable)
-      .where(eq(marketProviderRunsTable.userId, userId))
+      .where(
+        and(
+          eq(marketProviderRunsTable.userId, userId),
+          inArray(marketProviderRunsTable.status, ["success", "partial"]),
+        ),
+      )
       .orderBy(desc(marketProviderRunsTable.startedAt))
-      .limit(1);
-    const due = !latestRun || Date.now() - latestRun.startedAt.getTime() >= 24 * 60 * 60 * 1000;
-    if (!due) return { attempted: false, reason: "already_refreshed_today" as const };
+      .limit(20);
+    const latestQuoteRun = recentSuccessfulRuns.find((run) => {
+      const diagnostics = Array.isArray(run.metadata?.diagnostics)
+        ? run.metadata.diagnostics
+        : [];
+      return diagnostics.some((diagnostic) => {
+        if (!diagnostic || typeof diagnostic !== "object") return false;
+        const item = diagnostic as Record<string, unknown>;
+        return (
+          ["quotes", "snapshot"].includes(String(item.capability)) &&
+          ["success", "cached", "stale_fallback"].includes(
+            String(item.status),
+          ) &&
+          Number(item.records) > 0
+        );
+      });
+    });
+    const due =
+      !latestQuoteRun ||
+      Date.now() - latestQuoteRun.startedAt.getTime() >= 24 * 60 * 60 * 1000;
+    if (!due) {
+      return { attempted: false, reason: "already_refreshed_today" as const };
+    }
     const result = await this.refresh(userId, { force: false });
+    const alertEvaluation = result.preferences.autoEvaluateAlerts
+      ? await alertService.evaluate(userId)
+      : null;
     return {
       attempted: true,
       refreshedAt: result.refreshedAt,
       diagnostics: result.diagnostics,
+      ...(alertEvaluation
+        ? {
+            alertEvaluation: {
+              evaluatedAt: alertEvaluation.evaluatedAt,
+              candidates: alertEvaluation.candidates,
+              alertsUpserted: alertEvaluation.alertsUpserted,
+            },
+          }
+        : {}),
     };
   }
 
@@ -117,9 +188,14 @@ class LiveDataService {
     return created;
   }
 
-  async updatePreferences(userId: string, input: UpdateLiveDataPreferencesInput) {
+  async updatePreferences(
+    userId: string,
+    input: UpdateLiveDataPreferencesInput,
+  ) {
     await this.getPreferences(userId);
-    const knownProviders = new Set(listLiveDataProviders().map((provider) => provider.name));
+    const knownProviders = new Set(
+      listLiveDataProviders().map((provider) => provider.name),
+    );
     const providerPriority = input.providerPriority
       ? [...new Set(input.providerPriority.map(cleanProvider))]
       : undefined;
@@ -137,7 +213,9 @@ class LiveDataService {
           ? { autoEvaluateAlerts: input.autoEvaluateAlerts }
           : {}),
         ...(boundedInteger(input.quoteTtlMinutes, 1, 1_440) !== undefined
-          ? { quoteTtlMinutes: boundedInteger(input.quoteTtlMinutes, 1, 1_440)! }
+          ? {
+              quoteTtlMinutes: boundedInteger(input.quoteTtlMinutes, 1, 1_440)!,
+            }
           : {}),
         ...(boundedInteger(input.newsTtlMinutes, 5, 10_080) !== undefined
           ? { newsTtlMinutes: boundedInteger(input.newsTtlMinutes, 5, 10_080)! }
@@ -192,7 +270,9 @@ class LiveDataService {
     const provider = cleanProvider(input.provider);
     const providerSymbol = input.providerSymbol.trim();
     if (!providerSymbol || providerSymbol.length > 120) {
-      throw new Error("providerSymbol is required and must be at most 120 characters");
+      throw new Error(
+        "providerSymbol is required and must be at most 120 characters",
+      );
     }
     const [row] = await db
       .insert(liveDataSymbolMappingsTable)
@@ -245,7 +325,9 @@ class LiveDataService {
     const mappings = (await this.listMappings(userId)).filter(
       (mapping) => mapping.provider === provider.name && mapping.isEnabled,
     );
-    const mappingByTicker = new Map(mappings.map((mapping) => [mapping.ticker, mapping]));
+    const mappingByTicker = new Map(
+      mappings.map((mapping) => [mapping.ticker, mapping]),
+    );
     const defaultSuffix =
       provider.name === "alpha-vantage"
         ? process.env.ALPHA_VANTAGE_DEFAULT_SUFFIX?.trim() || "BSE"
@@ -263,11 +345,7 @@ class LiveDataService {
     });
   }
 
-  private async getCache(
-    userId: string,
-    provider: string,
-    cacheKey: string,
-  ) {
+  private async getCache(userId: string, provider: string, cacheKey: string) {
     const [row] = await db
       .select()
       .from(liveDataProviderCacheTable)
@@ -346,7 +424,8 @@ class LiveDataService {
     userId: string;
     provider: LiveDataProvider;
     capability: Capability;
-    cacheKind: "quotes" | "news" | "calendar" | "corporate_actions" | "snapshot";
+    cacheKind:
+      "quotes" | "news" | "calendar" | "corporate_actions" | "snapshot";
     symbols: ProviderSymbol[];
     ttlMinutes: number;
     staleIfErrorMinutes: number;
@@ -367,7 +446,9 @@ class LiveDataService {
           provider: input.provider.name,
           capability: input.capability,
           status: "cached",
-          records: Array.isArray(cached.payload.data) ? cached.payload.data.length : 1,
+          records: Array.isArray(cached.payload.data)
+            ? cached.payload.data.length
+            : 1,
           cacheAgeMinutes: cacheAgeMinutes(cached.fetchedAt, now),
         },
       };
@@ -395,8 +476,15 @@ class LiveDataService {
         },
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Provider request failed";
-      if (cached) await this.recordCacheError(input.userId, input.provider.name, cacheKey, message);
+      const message =
+        error instanceof Error ? error.message : "Provider request failed";
+      if (cached)
+        await this.recordCacheError(
+          input.userId,
+          input.provider.name,
+          cacheKey,
+          message,
+        );
       if (cached && getCacheState(cached, now) === "stale_fallback") {
         return {
           data: cached.payload.data as T,
@@ -434,7 +522,12 @@ class LiveDataService {
       .map((name) => providersByName.get(name))
       .filter((provider): provider is LiveDataProvider => Boolean(provider));
     const diagnostics: ProviderRefreshDiagnostic[] = [];
-    const imports: Array<{ provider: string; imported: Awaited<ReturnType<typeof marketIntelligenceService.importNormalizedData>> }> = [];
+    const imports: Array<{
+      provider: string;
+      imported: Awaited<
+        ReturnType<typeof marketIntelligenceService.importNormalizedData>
+      >;
+    }> = [];
     const capabilitySatisfied = {
       quotes: false,
       news: false,
@@ -499,7 +592,11 @@ class LiveDataService {
         diagnostics.push(result.diagnostic);
         if (result.data) payload = { ...result.data, provider: provider.name };
       } else {
-        if (!capabilitySatisfied.quotes && provider.capabilities.quotes && provider.fetchQuotes) {
+        if (
+          !capabilitySatisfied.quotes &&
+          provider.capabilities.quotes &&
+          provider.fetchQuotes
+        ) {
           const result = await this.fetchWithCache<MarketPointInput[]>({
             userId,
             provider,
@@ -511,10 +608,28 @@ class LiveDataService {
             force: options.force ?? false,
             fetcher: () => provider.fetchQuotes!(context),
           });
-          diagnostics.push(result.diagnostic);
+          const returnedTickers = new Set(
+            (result.data ?? []).map((point) => point.symbol.toUpperCase()),
+          );
+          const missingTickers = symbols
+            .map((symbol) => symbol.ticker.toUpperCase())
+            .filter((ticker) => !returnedTickers.has(ticker));
+          diagnostics.push(
+            missingTickers.length > 0 && (result.data?.length ?? 0) > 0
+              ? {
+                  ...result.diagnostic,
+                  status: "stale_fallback",
+                  message: `Quotes were unavailable for: ${missingTickers.slice(0, 12).join(", ")}${missingTickers.length > 12 ? " and more" : ""}.`,
+                }
+              : result.diagnostic,
+          );
           payload.points = result.data ?? [];
         }
-        if (!capabilitySatisfied.news && provider.capabilities.news && provider.fetchNews) {
+        if (
+          !capabilitySatisfied.news &&
+          provider.capabilities.news &&
+          provider.fetchNews
+        ) {
           const result = await this.fetchWithCache<MarketNewsInput[]>({
             userId,
             provider,
@@ -575,7 +690,8 @@ class LiveDataService {
         (payload.events?.length ?? 0);
       const failedForProvider = diagnostics.filter(
         (diagnostic) =>
-          diagnostic.provider === provider.name && diagnostic.status === "failed",
+          diagnostic.provider === provider.name &&
+          ["failed", "stale_fallback"].includes(diagnostic.status),
       );
       if (recordCount > 0) {
         const imported = await marketIntelligenceService.importNormalizedData(
@@ -585,9 +701,12 @@ class LiveDataService {
           { syncPortfolioPrices: preferences.autoSyncPortfolio },
         );
         imports.push({ provider: provider.name, imported });
-        if ((payload.points?.length ?? 0) > 0) capabilitySatisfied.quotes = true;
+        if ((payload.points?.length ?? 0) > 0)
+          capabilitySatisfied.quotes = true;
         if ((payload.news?.length ?? 0) > 0) capabilitySatisfied.news = true;
-        if ((payload.events ?? []).some((event) => event.eventType === "earnings")) {
+        if (
+          (payload.events ?? []).some((event) => event.eventType === "earnings")
+        ) {
           capabilitySatisfied.calendar = true;
         }
         if (
@@ -618,7 +737,11 @@ class LiveDataService {
             status: failedForProvider.length > 0 ? "failed" : "partial",
             completedAt: new Date(),
             recordsUpserted: 0,
-            error: failedForProvider.map((item) => item.message).filter(Boolean).join("; ") || null,
+            error:
+              failedForProvider
+                .map((item) => item.message)
+                .filter(Boolean)
+                .join("; ") || null,
             metadata: {
               diagnostics: diagnostics.filter(
                 (diagnostic) => diagnostic.provider === provider.name,
@@ -631,7 +754,9 @@ class LiveDataService {
 
     return {
       refreshedAt: new Date(),
-      configuredProviderCount: orderedProviders.filter((provider) => provider.isConfigured()).length,
+      configuredProviderCount: orderedProviders.filter((provider) =>
+        provider.isConfigured(),
+      ).length,
       imports,
       diagnostics,
       satisfiedCapabilities: capabilitySatisfied,
@@ -640,42 +765,49 @@ class LiveDataService {
   }
 
   async getStatus(userId: string) {
-    const [preferences, mappings, latestRuns, latestPoint, latestNews, latestEvent, cacheRows] =
-      await Promise.all([
-        this.getPreferences(userId),
-        this.listMappings(userId),
-        db
-          .select()
-          .from(marketProviderRunsTable)
-          .where(eq(marketProviderRunsTable.userId, userId))
-          .orderBy(desc(marketProviderRunsTable.startedAt))
-          .limit(20),
-        db
-          .select()
-          .from(marketDataPointsTable)
-          .where(eq(marketDataPointsTable.userId, userId))
-          .orderBy(desc(marketDataPointsTable.asOf))
-          .limit(1)
-          .then((rows) => rows[0] ?? null),
-        db
-          .select()
-          .from(marketNewsTable)
-          .where(eq(marketNewsTable.userId, userId))
-          .orderBy(desc(marketNewsTable.publishedAt))
-          .limit(1)
-          .then((rows) => rows[0] ?? null),
-        db
-          .select()
-          .from(marketEventsTable)
-          .where(eq(marketEventsTable.userId, userId))
-          .orderBy(desc(marketEventsTable.eventAt))
-          .limit(1)
-          .then((rows) => rows[0] ?? null),
-        db
-          .select()
-          .from(liveDataProviderCacheTable)
-          .where(eq(liveDataProviderCacheTable.userId, userId)),
-      ]);
+    const [
+      preferences,
+      mappings,
+      latestRuns,
+      latestPoint,
+      latestNews,
+      latestEvent,
+      cacheRows,
+    ] = await Promise.all([
+      this.getPreferences(userId),
+      this.listMappings(userId),
+      db
+        .select()
+        .from(marketProviderRunsTable)
+        .where(eq(marketProviderRunsTable.userId, userId))
+        .orderBy(desc(marketProviderRunsTable.startedAt))
+        .limit(20),
+      db
+        .select()
+        .from(marketDataPointsTable)
+        .where(eq(marketDataPointsTable.userId, userId))
+        .orderBy(desc(marketDataPointsTable.asOf))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(marketNewsTable)
+        .where(eq(marketNewsTable.userId, userId))
+        .orderBy(desc(marketNewsTable.publishedAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(marketEventsTable)
+        .where(eq(marketEventsTable.userId, userId))
+        .orderBy(desc(marketEventsTable.eventAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(liveDataProviderCacheTable)
+        .where(eq(liveDataProviderCacheTable.userId, userId)),
+    ]);
     const now = new Date();
     return {
       providers: listLiveDataProviders().map((provider) => ({
@@ -694,11 +826,14 @@ class LiveDataService {
       },
       cache: {
         entries: cacheRows.length,
-        fresh: cacheRows.filter((row) => getCacheState(row, now) === "fresh").length,
+        fresh: cacheRows.filter((row) => getCacheState(row, now) === "fresh")
+          .length,
         staleFallback: cacheRows.filter(
           (row) => getCacheState(row, now) === "stale_fallback",
         ).length,
-        expired: cacheRows.filter((row) => getCacheState(row, now) === "expired").length,
+        expired: cacheRows.filter(
+          (row) => getCacheState(row, now) === "expired",
+        ).length,
       },
       secretsStoredInDatabase: false,
     };

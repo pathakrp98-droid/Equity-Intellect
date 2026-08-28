@@ -24,11 +24,9 @@ import {
   type MarketQuote,
   type PortfolioCalculation,
   type PortfolioTransactionType,
+  visiblePortfolioRiskFlags,
 } from "./engine";
-import {
-  buildHoldingsCsvTemplate,
-  parseHoldingsCsv,
-} from "./holdingsCsv";
+import { buildHoldingsCsvTemplate, parseHoldingsCsv } from "./holdingsCsv";
 import { buildHoldingResearchTrigger } from "../research/automation/researchTriggers";
 
 export interface CreateTransactionInput {
@@ -232,7 +230,10 @@ export class PortfolioService {
         eq(portfolioTransactionsTable.brokerAccountId, brokerAccountsTable.id),
       )
       .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id))
-      .orderBy(desc(portfolioTransactionsTable.tradeDate), desc(portfolioTransactionsTable.id));
+      .orderBy(
+        desc(portfolioTransactionsTable.tradeDate),
+        desc(portfolioTransactionsTable.id),
+      );
 
     return rows.map(({ transaction, broker, accountName }) => ({
       ...transaction,
@@ -289,7 +290,11 @@ export class PortfolioService {
     }
   }
 
-  async deleteTransaction(userId: string, transactionId: number, portfolioId?: number) {
+  async deleteTransaction(
+    userId: string,
+    transactionId: number,
+    portfolioId?: number,
+  ) {
     const portfolio = await this.getPortfolio(userId, portfolioId);
     const [deleted] = await db
       .delete(portfolioTransactionsTable)
@@ -312,11 +317,7 @@ export class PortfolioService {
     }
   }
 
-
-  async importHoldingsCsv(
-    userId: string,
-    input: ImportHoldingsCsvInput,
-  ) {
+  async importHoldingsCsv(userId: string, input: ImportHoldingsCsvInput) {
     const portfolio = await this.getPortfolio(userId, input.portfolioId);
     const parsed = parseHoldingsCsv(input.csv);
     if (parsed.holdings.length === 0) {
@@ -499,9 +500,12 @@ export class PortfolioService {
     return this.recalculate(userId, portfolio.id);
   }
 
-  async recalculate(userId: string, portfolioId?: number): Promise<PortfolioCalculation> {
+  async recalculate(
+    userId: string,
+    portfolioId?: number,
+  ): Promise<PortfolioCalculation> {
     const portfolio = await this.getPortfolio(userId, portfolioId);
-    const [directHoldings, transactions, prices, accounts, cashAccount] = await Promise.all([
+    const [directHoldings, transactions, prices, accounts] = await Promise.all([
       db
         .select()
         .from(portfolioDirectHoldingsTable)
@@ -511,7 +515,10 @@ export class PortfolioService {
         .select()
         .from(portfolioTransactionsTable)
         .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id))
-        .orderBy(asc(portfolioTransactionsTable.tradeDate), asc(portfolioTransactionsTable.id)),
+        .orderBy(
+          asc(portfolioTransactionsTable.tradeDate),
+          asc(portfolioTransactionsTable.id),
+        ),
       db
         .select()
         .from(portfolioMarketPricesTable)
@@ -520,12 +527,6 @@ export class PortfolioService {
         .select()
         .from(brokerAccountsTable)
         .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
-      db
-        .select()
-        .from(portfolioCashAccountsTable)
-        .where(eq(portfolioCashAccountsTable.portfolioId, portfolio.id))
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
     ]);
 
     const brokerNames = new Map(
@@ -554,7 +555,8 @@ export class PortfolioService {
               sector: holding.sector,
               type: "buy" as const,
               quantity: holding.quantity,
-              price: holding.averageCost > 0 ? holding.averageCost : Number.EPSILON,
+              price:
+                holding.averageCost > 0 ? holding.averageCost : Number.EPSILON,
               tradeDate: openingDate,
               broker: "holdings_csv",
             })),
@@ -572,7 +574,6 @@ export class PortfolioService {
           ),
       prices.map(asMarketQuote),
       new Date(),
-      cashAccount?.isManual ? cashAccount.balance : undefined,
     );
     const directByTicker = new Map(
       directHoldings.map((holding) => [
@@ -629,7 +630,7 @@ export class PortfolioService {
           portfolioId: portfolio.id,
           currency: portfolio.baseCurrency,
           balance: calculation.cashBalance,
-          isManual: cashAccount?.isManual ?? false,
+          isManual: false,
           updatedAt: calculation.asOf,
         })
         .onConflictDoUpdate({
@@ -639,7 +640,7 @@ export class PortfolioService {
           ],
           set: {
             balance: calculation.cashBalance,
-            isManual: cashAccount?.isManual ?? false,
+            isManual: false,
             updatedAt: calculation.asOf,
           },
         });
@@ -693,7 +694,10 @@ export class PortfolioService {
       .select()
       .from(portfolioSnapshotsTable)
       .where(eq(portfolioSnapshotsTable.portfolioId, portfolioId))
-      .orderBy(desc(portfolioSnapshotsTable.asOf), desc(portfolioSnapshotsTable.id))
+      .orderBy(
+        desc(portfolioSnapshotsTable.asOf),
+        desc(portfolioSnapshotsTable.id),
+      )
       .limit(1);
     return snapshot;
   }
@@ -716,7 +720,12 @@ export class PortfolioService {
 
     return {
       portfolio,
-      snapshot,
+      snapshot: snapshot
+        ? {
+            ...snapshot,
+            riskFlags: visiblePortfolioRiskFlags(snapshot.riskFlags ?? []),
+          }
+        : snapshot,
       holdings,
       transactionCount: transactionCount.length,
       priceCoverage: {
@@ -746,13 +755,13 @@ export class PortfolioService {
         db
           .select()
           .from(portfolioMarketPricesTable)
-        .where(eq(portfolioMarketPricesTable.portfolioId, portfolio.id)),
-      db
-        .select()
-        .from(portfolioTransactionsTable)
-        .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id)),
-      db
-        .select()
+          .where(eq(portfolioMarketPricesTable.portfolioId, portfolio.id)),
+        db
+          .select()
+          .from(portfolioTransactionsTable)
+          .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id)),
+        db
+          .select()
           .from(brokerAccountsTable)
           .where(eq(brokerAccountsTable.portfolioId, portfolio.id)),
       ]);
@@ -760,9 +769,15 @@ export class PortfolioService {
     const directByTicker = new Map(
       directHoldings.map((holding) => [holding.symbol, holding]),
     );
-    const priceSources = new Map(prices.map((price) => [price.ticker, price.source]));
-    const priceTimes = new Map(prices.map((price) => [price.ticker, price.asOf]));
-    const accountNames = new Map(accounts.map((account) => [account.id, account.broker]));
+    const priceSources = new Map(
+      prices.map((price) => [price.ticker, price.source]),
+    );
+    const priceTimes = new Map(
+      prices.map((price) => [price.ticker, price.asOf]),
+    );
+    const accountNames = new Map(
+      accounts.map((account) => [account.id, account.broker]),
+    );
     const brokersByTicker = new Map<string, Set<string>>();
     for (const transaction of transactions) {
       if (!transaction.ticker || !transaction.brokerAccountId) continue;
@@ -797,96 +812,113 @@ export class PortfolioService {
         priceSource: priceSources.get(holding.ticker) ?? "last_transaction",
         priceAsOf: priceTimes.get(holding.ticker) ?? null,
         priceStatus: !priceTimes.has(holding.ticker)
-          ? "missing" as const
-          : Date.now() - priceTimes.get(holding.ticker)!.getTime() > 24 * 60 * 60 * 1000
-            ? "stale" as const
-            : "fresh" as const,
+          ? ("missing" as const)
+          : Date.now() - priceTimes.get(holding.ticker)!.getTime() >
+              24 * 60 * 60 * 1000
+            ? ("stale" as const)
+            : ("fresh" as const),
         brokers: [...(brokersByTicker.get(holding.ticker) ?? new Set())],
       };
     });
-  }
-
-  async setCashBalance(userId: string, balance: number, portfolioId?: number) {
-    if (!Number.isFinite(balance) || balance < 0) {
-      throw new Error("balance must be zero or greater");
-    }
-    const portfolio = await this.getPortfolio(userId, portfolioId);
-    const now = new Date();
-    await db.insert(portfolioCashAccountsTable).values({
-      portfolioId: portfolio.id,
-      currency: portfolio.baseCurrency,
-      balance,
-      isManual: true,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: [portfolioCashAccountsTable.portfolioId, portfolioCashAccountsTable.currency],
-      set: { balance, isManual: true, updatedAt: now },
-    });
-    return this.recalculate(userId, portfolio.id);
   }
 
   async createDirectHolding(userId: string, input: DirectHoldingInput) {
     const portfolio = await this.getPortfolio(userId, input.portfolioId);
     const symbol = normalizeTicker(input.symbol);
     if (!symbol) throw new Error("symbol is required");
-    const [created] = await db.insert(portfolioDirectHoldingsTable).values({
-      portfolioId: portfolio.id,
-      symbol,
-      isin: input.isin?.trim() || null,
-      name: input.name?.trim() || symbol,
-      exchange: input.exchange?.trim().toUpperCase() || "NSE",
-      sector: input.sector?.trim() || "Unclassified",
-      quantity: input.quantity,
-      availableQuantity: input.availableQuantity ?? input.quantity,
-      averageCost: input.averageCost,
-      previousClose: input.previousClose,
-      importedAt: new Date(),
-    }).returning();
-    await db.insert(portfolioMarketPricesTable).values({
-      portfolioId: portfolio.id,
-      ticker: symbol,
-      price: input.previousClose,
-      previousClose: input.previousClose,
-      source: "manual_holding",
-      asOf: new Date(),
-    }).onConflictDoUpdate({
-      target: [portfolioMarketPricesTable.portfolioId, portfolioMarketPricesTable.ticker],
-      set: { price: input.previousClose, previousClose: input.previousClose, source: "manual_holding", asOf: new Date() },
-    });
+    const [created] = await db
+      .insert(portfolioDirectHoldingsTable)
+      .values({
+        portfolioId: portfolio.id,
+        symbol,
+        isin: input.isin?.trim() || null,
+        name: input.name?.trim() || symbol,
+        exchange: input.exchange?.trim().toUpperCase() || "NSE",
+        sector: input.sector?.trim() || "Unclassified",
+        quantity: input.quantity,
+        availableQuantity: input.availableQuantity ?? input.quantity,
+        averageCost: input.averageCost,
+        previousClose: input.previousClose,
+        importedAt: new Date(),
+      })
+      .returning();
+    await db
+      .insert(portfolioMarketPricesTable)
+      .values({
+        portfolioId: portfolio.id,
+        ticker: symbol,
+        price: input.previousClose,
+        previousClose: input.previousClose,
+        source: "manual_holding",
+        asOf: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          portfolioMarketPricesTable.portfolioId,
+          portfolioMarketPricesTable.ticker,
+        ],
+        set: {
+          price: input.previousClose,
+          previousClose: input.previousClose,
+          source: "manual_holding",
+          asOf: new Date(),
+        },
+      });
     await this.recalculate(userId, portfolio.id);
     return created;
   }
 
-  async updateDirectHolding(userId: string, holdingId: number, input: DirectHoldingInput) {
+  async updateDirectHolding(
+    userId: string,
+    holdingId: number,
+    input: DirectHoldingInput,
+  ) {
     const portfolio = await this.getPortfolio(userId, input.portfolioId);
     const symbol = normalizeTicker(input.symbol);
     if (!symbol) throw new Error("symbol is required");
-    const [updated] = await db.update(portfolioDirectHoldingsTable).set({
-      symbol,
-      isin: input.isin?.trim() || null,
-      name: input.name?.trim() || symbol,
-      exchange: input.exchange?.trim().toUpperCase() || "NSE",
-      sector: input.sector?.trim() || "Unclassified",
-      quantity: input.quantity,
-      availableQuantity: input.availableQuantity ?? input.quantity,
-      averageCost: input.averageCost,
-      previousClose: input.previousClose,
-    }).where(and(
-      eq(portfolioDirectHoldingsTable.id, holdingId),
-      eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id),
-    )).returning();
+    const [updated] = await db
+      .update(portfolioDirectHoldingsTable)
+      .set({
+        symbol,
+        isin: input.isin?.trim() || null,
+        name: input.name?.trim() || symbol,
+        exchange: input.exchange?.trim().toUpperCase() || "NSE",
+        sector: input.sector?.trim() || "Unclassified",
+        quantity: input.quantity,
+        availableQuantity: input.availableQuantity ?? input.quantity,
+        averageCost: input.averageCost,
+        previousClose: input.previousClose,
+      })
+      .where(
+        and(
+          eq(portfolioDirectHoldingsTable.id, holdingId),
+          eq(portfolioDirectHoldingsTable.portfolioId, portfolio.id),
+        ),
+      )
+      .returning();
     if (!updated) throw new Error("Holding not found");
-    await db.insert(portfolioMarketPricesTable).values({
-      portfolioId: portfolio.id,
-      ticker: symbol,
-      price: input.previousClose,
-      previousClose: input.previousClose,
-      source: "manual_holding",
-      asOf: new Date(),
-    }).onConflictDoUpdate({
-      target: [portfolioMarketPricesTable.portfolioId, portfolioMarketPricesTable.ticker],
-      set: { price: input.previousClose, previousClose: input.previousClose, source: "manual_holding", asOf: new Date() },
-    });
+    await db
+      .insert(portfolioMarketPricesTable)
+      .values({
+        portfolioId: portfolio.id,
+        ticker: symbol,
+        price: input.previousClose,
+        previousClose: input.previousClose,
+        source: "manual_holding",
+        asOf: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          portfolioMarketPricesTable.portfolioId,
+          portfolioMarketPricesTable.ticker,
+        ],
+        set: {
+          price: input.previousClose,
+          previousClose: input.previousClose,
+          source: "manual_holding",
+          asOf: new Date(),
+        },
+      });
     await this.recalculate(userId, portfolio.id);
     return updated;
   }
@@ -952,17 +984,19 @@ export class PortfolioService {
         {
           scenario: "Broad market correction",
           portfolioImpactPct: -20,
-          description: "Deterministic 20% mark-to-market shock across equity holdings.",
+          description:
+            "Deterministic 20% mark-to-market shock across equity holdings.",
         },
         {
           scenario: "Moderate recession",
           portfolioImpactPct: -15,
-          description: "Deterministic 15% mark-to-market shock across equity holdings.",
+          description:
+            "Deterministic 15% mark-to-market shock across equity holdings.",
         },
       ],
       var95: 0,
       var99: 0,
-      riskFlags: snapshot.riskFlags,
+      riskFlags: visiblePortfolioRiskFlags(snapshot.riskFlags ?? []),
       dataQuality: {
         returnHistoryAvailable: false,
         correlationAvailable: false,
@@ -981,7 +1015,10 @@ export class PortfolioService {
         .select()
         .from(portfolioTransactionsTable)
         .where(eq(portfolioTransactionsTable.portfolioId, portfolio.id))
-        .orderBy(asc(portfolioTransactionsTable.tradeDate), asc(portfolioTransactionsTable.id)),
+        .orderBy(
+          asc(portfolioTransactionsTable.tradeDate),
+          asc(portfolioTransactionsTable.id),
+        ),
       db
         .select()
         .from(portfolioMarketPricesTable)
@@ -992,7 +1029,9 @@ export class PortfolioService {
       const calculation = calculatePortfolio(
         allTransactions
           .filter((transaction) => transaction.brokerAccountId === account.id)
-          .map((transaction) => asEngineTransaction(transaction, account.broker)),
+          .map((transaction) =>
+            asEngineTransaction(transaction, account.broker),
+          ),
         prices.map(asMarketQuote),
       );
       return {

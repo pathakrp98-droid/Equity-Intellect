@@ -8,6 +8,7 @@ import type {
   BriefResearchSignal,
 } from "./types";
 import { isMarketPointStale, isNewsStale } from "./normalization";
+import { visiblePortfolioRiskFlags } from "../portfolio/engine";
 
 export interface MorningBriefActionResult {
   id: string;
@@ -15,12 +16,7 @@ export interface MorningBriefActionResult {
   ticker?: string | null;
   title: string;
   rationale: string;
-  actionType:
-    | "review"
-    | "research"
-    | "monitor"
-    | "rebalance"
-    | "verify_data";
+  actionType: "review" | "research" | "monitor" | "rebalance" | "verify_data";
   sourceIds: string[];
   sourceLinks?: string[];
 }
@@ -51,6 +47,17 @@ export interface MorningBriefResult {
       asOf: string;
       source: string;
     }>;
+    materialNews: Array<{
+      id: number;
+      ticker: string | null;
+      headline: string;
+      summary: string | null;
+      sentiment: string;
+      relevanceScore: number;
+      publishedAt: string;
+      source: string;
+      sourceUrl: string | null;
+    }>;
   };
   portfolioPulse: {
     totalValue: number;
@@ -63,6 +70,30 @@ export interface MorningBriefResult {
     largestPositionPct: number;
     holdingsCount: number;
     concentrationRisk: string;
+    movers: Array<{
+      ticker: string;
+      name: string;
+      marketPrice: number;
+      dayChangePct: number;
+      dayPnl: number;
+      contributionPct: number;
+      direction: "gainer" | "loser" | "flat";
+      priceSource: string;
+      priceStatus: "fresh" | "stale" | "missing";
+    }>;
+    changeSincePrevious: {
+      previousBriefDate: string | null;
+      portfolioValueChange: number | null;
+      dailyPnlChange: number | null;
+      largestPositionPctChange: number | null;
+      highPriorityActionChange: number | null;
+      summary: string;
+    };
+    guardian: {
+      score: number;
+      band: string;
+      topRisks: string[];
+    } | null;
   };
   priorityActions: MorningBriefActionResult[];
   upcomingEvents: Array<{
@@ -100,6 +131,20 @@ export interface BuildMorningBriefInput {
   news: BriefNewsItem[];
   events: BriefEventItem[];
   preferences: BriefPreferences;
+  previousBrief?: {
+    briefDate: string;
+    portfolioPulse: {
+      totalValue: number;
+      dailyPnl: number;
+      largestPositionPct: number;
+    };
+    priorityActions: Array<{ priority: "high" | "medium" | "low" }>;
+  } | null;
+  guardian?: {
+    score: number;
+    band: string;
+    topRisks: string[];
+  } | null;
 }
 
 function round(value: number, digits = 2): number {
@@ -125,7 +170,9 @@ function localDateKey(date: Date, timezone: string): string {
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
   return `${values.year}-${values.month}-${values.day}`;
 }
 
@@ -136,10 +183,14 @@ function dayPnl(holdings: BriefHolding[]): number {
   );
 }
 
-function getMarketTone(points: BriefMarketPoint[]): MorningBriefResult["marketPulse"]["tone"] {
+function getMarketTone(
+  points: BriefMarketPoint[],
+): MorningBriefResult["marketPulse"]["tone"] {
   const changes = points
     .map((point) => point.changePct)
-    .filter((value): value is number => value !== null && Number.isFinite(value));
+    .filter(
+      (value): value is number => value !== null && Number.isFinite(value),
+    );
   if (changes.length === 0) return "unknown";
   const positive = changes.filter((change) => change > 0.15).length;
   const negative = changes.filter((change) => change < -0.15).length;
@@ -180,10 +231,14 @@ function researchSourceId(ticker: string): string {
   return `RESEARCH-${ticker}`;
 }
 
-export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefResult {
+export function buildMorningBrief(
+  input: BuildMorningBriefInput,
+): MorningBriefResult {
   const now = input.now ?? new Date();
   const briefDate = localDateKey(now, input.preferences.timezone);
-  const portfolioTickers = new Set(input.holdings.map((holding) => holding.ticker));
+  const portfolioTickers = new Set(
+    input.holdings.map((holding) => holding.ticker),
+  );
   const marketPoints = input.marketPoints.filter((point) => {
     if (
       !input.preferences.includeGlobalMarkets &&
@@ -234,7 +289,12 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
     isNewsStale(item.publishedAt, input.preferences.staleNewsHours, now),
   );
   const recentPoints = marketPoints.filter(
-    (point) => !isMarketPointStale(point.asOf, input.preferences.staleMarketMinutes, now),
+    (point) =>
+      !isMarketPointStale(
+        point.asOf,
+        input.preferences.staleMarketMinutes,
+        now,
+      ),
   );
   const tone = getMarketTone(recentPoints);
   const sortedMarketMoves = [...marketPoints]
@@ -275,15 +335,21 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
   } else if (staleMarketPoints.length > 0) {
     actions.push({
       id: "refresh-stale-market-data",
-      priority: staleMarketPoints.length === marketPoints.length ? "high" : "medium",
+      priority:
+        staleMarketPoints.length === marketPoints.length ? "high" : "medium",
       title: "Refresh stale market indicators",
       rationale: `${staleMarketPoints.length} of ${marketPoints.length} market indicators exceed the configured freshness threshold.`,
       actionType: "verify_data",
-      sourceIds: staleMarketPoints.map((point) => `MARKET-${point.kind}-${point.symbol}`),
+      sourceIds: staleMarketPoints.map(
+        (point) => `MARKET-${point.kind}-${point.symbol}`,
+      ),
     });
   }
 
-  if (input.portfolio.concentrationRisk === "high" || input.portfolio.largestPositionPct > 25) {
+  if (
+    input.portfolio.concentrationRisk === "high" ||
+    input.portfolio.largestPositionPct > 25
+  ) {
     risks.push({
       id: "portfolio-concentration",
       severity: "high",
@@ -307,7 +373,10 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
     });
   }
 
-  for (const flag of input.portfolio.riskFlags.slice(0, 5)) {
+  for (const flag of visiblePortfolioRiskFlags(input.portfolio.riskFlags).slice(
+    0,
+    5,
+  )) {
     risks.push({
       id: `portfolio-risk-${risks.length + 1}`,
       severity: /high|negative|below|exceed/i.test(flag) ? "high" : "medium",
@@ -318,7 +387,9 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
   }
 
   const negativeNews = portfolioNews
-    .filter((item) => item.sentiment === "negative" || item.sentiment === "mixed")
+    .filter(
+      (item) => item.sentiment === "negative" || item.sentiment === "mixed",
+    )
     .sort(
       (left, right) =>
         right.relevanceScore - left.relevanceScore ||
@@ -332,14 +403,18 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
       severity: item.relevanceScore >= 0.9 ? "high" : "medium",
       ticker,
       title: item.headline,
-      detail: item.summary ?? `Negative or mixed portfolio-relevant news from ${item.source}.`,
+      detail:
+        item.summary ??
+        `Negative or mixed portfolio-relevant news from ${item.source}.`,
       sourceIds: [newsSourceId(item)],
     });
     actions.push({
       id: `review-news-${item.id}`,
       priority: item.relevanceScore >= 0.9 ? "high" : "medium",
       ticker,
-      title: ticker ? `Review ${ticker} news impact` : "Review market news impact",
+      title: ticker
+        ? `Review ${ticker} news impact`
+        : "Review market news impact",
       rationale: item.headline,
       actionType: "review",
       sourceIds: [newsSourceId(item)],
@@ -412,7 +487,10 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
         sourceIds: [researchSourceId(signal.ticker)],
       });
     }
-    if (signal.nextReviewAt && signal.nextReviewAt <= new Date(now.getTime() + 7 * 86_400_000)) {
+    if (
+      signal.nextReviewAt &&
+      signal.nextReviewAt <= new Date(now.getTime() + 7 * 86_400_000)
+    ) {
       actions.push({
         id: `scheduled-review-${signal.ticker}`,
         priority: signal.nextReviewAt < now ? "high" : "medium",
@@ -425,7 +503,9 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
     }
   }
 
-  for (const event of upcomingEvents.filter((item) => item.impact === "critical" || item.impact === "high")) {
+  for (const event of upcomingEvents.filter(
+    (item) => item.impact === "critical" || item.impact === "high",
+  )) {
     actions.push({
       id: `prepare-event-${event.id}`,
       priority: event.impact === "critical" ? "high" : "medium",
@@ -450,19 +530,87 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
     )
     .slice(0, 10);
 
+  const moverEligibleHoldings = input.holdings.filter(
+    (holding) => holding.priceStatus !== "missing",
+  );
+  const gainers = moverEligibleHoldings
+    .filter((holding) => holding.dayChangePct > 0)
+    .sort((left, right) => right.dayChangePct - left.dayChangePct)
+    .slice(0, 3);
+  const losers = moverEligibleHoldings
+    .filter((holding) => holding.dayChangePct < 0)
+    .sort((left, right) => left.dayChangePct - right.dayChangePct)
+    .slice(0, 3);
+  const movers = [...gainers, ...losers].map((holding) => {
+    const holdingDayPnl = holding.dayChange * holding.quantity;
+    return {
+      ticker: holding.ticker,
+      name: holding.name,
+      marketPrice: round(holding.marketPrice),
+      dayChangePct: round(holding.dayChangePct),
+      dayPnl: round(holdingDayPnl),
+      contributionPct:
+        dailyBase === 0 ? 0 : round((holdingDayPnl / dailyBase) * 100),
+      direction:
+        holding.dayChangePct > 0
+          ? ("gainer" as const)
+          : holding.dayChangePct < 0
+            ? ("loser" as const)
+            : ("flat" as const),
+      priceSource: holding.priceSource,
+      priceStatus: holding.priceStatus ?? "fresh",
+    };
+  });
+  const currentHighPriorityActions = priorityActions.filter(
+    (action) => action.priority === "high",
+  ).length;
+  const previous = input.previousBrief ?? null;
+  const portfolioValueChange = previous
+    ? round(input.portfolio.totalValue - previous.portfolioPulse.totalValue)
+    : null;
+  const dailyPnlChange = previous
+    ? round(dailyPnl - previous.portfolioPulse.dailyPnl)
+    : null;
+  const largestPositionPctChange = previous
+    ? round(
+        input.portfolio.largestPositionPct -
+          previous.portfolioPulse.largestPositionPct,
+      )
+    : null;
+  const highPriorityActionChange = previous
+    ? currentHighPriorityActions -
+      previous.priorityActions.filter((action) => action.priority === "high")
+        .length
+    : null;
+  const changeSummary = previous
+    ? `Since ${previous.briefDate}, portfolio value ${portfolioValueChange! >= 0 ? "increased" : "decreased"} by ${formatMoney(Math.abs(portfolioValueChange!))}; high-priority actions ${highPriorityActionChange === 0 ? "are unchanged" : highPriorityActionChange! > 0 ? `increased by ${highPriorityActionChange}` : `decreased by ${Math.abs(highPriorityActionChange!)}`}.`
+    : "No earlier brief is available for comparison yet.";
+
   const latestMarketAsOf = marketPoints.length
-    ? new Date(Math.max(...marketPoints.map((point) => point.asOf.getTime()))).toISOString()
+    ? new Date(
+        Math.max(...marketPoints.map((point) => point.asOf.getTime())),
+      ).toISOString()
     : null;
   const latestNewsAt = portfolioNews.length
-    ? new Date(Math.max(...portfolioNews.map((item) => item.publishedAt.getTime()))).toISOString()
+    ? new Date(
+        Math.max(...portfolioNews.map((item) => item.publishedAt.getTime())),
+      ).toISOString()
     : null;
   const warnings: string[] = [];
-  if (!input.providerConfigured) warnings.push("No external provider is configured.");
-  if (marketPoints.length === 0) warnings.push("No market snapshot is available.");
-  if (staleMarketPoints.length > 0) warnings.push(`${staleMarketPoints.length} market indicators are stale.`);
-  if (staleNews.length > 0) warnings.push(`${staleNews.length} portfolio-news items are stale.`);
-  if (input.holdings.some((holding) => holding.priceSource === "last_transaction")) {
-    warnings.push("Some holdings use last-transaction prices instead of current quotes.");
+  if (!input.providerConfigured)
+    warnings.push("No external provider is configured.");
+  if (marketPoints.length === 0)
+    warnings.push("No market snapshot is available.");
+  if (staleMarketPoints.length > 0)
+    warnings.push(`${staleMarketPoints.length} market indicators are stale.`);
+  if (staleNews.length > 0)
+    warnings.push(`${staleNews.length} portfolio-news items are stale.`);
+  if (
+    input.holdings.some((holding) => holding.priceSource === "last_transaction")
+  ) {
+    warnings.push(
+      "Some holdings use last-transaction prices instead of current quotes.",
+    );
   }
 
   const marketSummary =
@@ -478,7 +626,7 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
       : "no urgent actions",
   ];
   const summaryParts = [
-    `Portfolio value is ${formatMoney(input.portfolio.totalValue)} with ${formatMoney(input.portfolio.cashBalance)} in cash.`,
+    `Portfolio value is ${formatMoney(input.portfolio.totalValue)}.`,
     marketSummary,
     portfolioNews.length > 0
       ? `${portfolioNews.length} portfolio-relevant news item${portfolioNews.length === 1 ? "" : "s"} are in the current feed.`
@@ -504,6 +652,24 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
         asOf: point.asOf.toISOString(),
         source: point.source,
       })),
+      materialNews: [...portfolioNews]
+        .sort(
+          (left, right) =>
+            right.relevanceScore - left.relevanceScore ||
+            right.publishedAt.getTime() - left.publishedAt.getTime(),
+        )
+        .slice(0, 6)
+        .map((item) => ({
+          id: item.id,
+          ticker: item.ticker,
+          headline: item.headline,
+          summary: item.summary,
+          sentiment: item.sentiment,
+          relevanceScore: round(item.relevanceScore),
+          publishedAt: item.publishedAt.toISOString(),
+          source: item.source,
+          sourceUrl: item.sourceUrl,
+        })),
     },
     portfolioPulse: {
       totalValue: input.portfolio.totalValue,
@@ -516,6 +682,25 @@ export function buildMorningBrief(input: BuildMorningBriefInput): MorningBriefRe
       largestPositionPct: input.portfolio.largestPositionPct,
       holdingsCount: input.portfolio.holdingsCount,
       concentrationRisk: input.portfolio.concentrationRisk,
+      movers,
+      changeSincePrevious: {
+        previousBriefDate: previous?.briefDate ?? null,
+        portfolioValueChange,
+        dailyPnlChange,
+        largestPositionPctChange,
+        highPriorityActionChange,
+        summary: changeSummary,
+      },
+      guardian: input.guardian
+        ? {
+            score: input.guardian.score,
+            band: input.guardian.band,
+            topRisks: visiblePortfolioRiskFlags(input.guardian.topRisks).slice(
+              0,
+              6,
+            ),
+          }
+        : null,
     },
     priorityActions,
     upcomingEvents: upcomingEvents.map((event) => ({

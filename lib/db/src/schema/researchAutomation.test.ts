@@ -13,6 +13,13 @@ const migrationSql = readFileSync(
   ),
   "utf8",
 );
+const identityReconciliationSql = readFileSync(
+  new URL(
+    "../../migrations/20260828_reconcile_automated_research_identities.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 function tableConfig(name: keyof typeof schema) {
   const table = schema[name];
@@ -66,6 +73,27 @@ function sqlEnumValues(name: string) {
 }
 
 describe("automated research persistence schema", () => {
+  it("queues one idempotent identity reconciliation event per active portfolio", () => {
+    assert.match(
+      identityReconciliationSql,
+      /INSERT INTO research_automation_trigger_events/i,
+    );
+    assert.match(
+      identityReconciliationSql,
+      /SELECT DISTINCT\s+t\.user_id,\s+t\.portfolio_id/is,
+    );
+    assert.match(identityReconciliationSql, /'portfolio_reconciled'/i);
+    assert.match(
+      identityReconciliationSql,
+      /concat\('identity-reconcile-v1:', t\.portfolio_id\)/i,
+    );
+    assert.match(identityReconciliationSql, /ON CONFLICT \(user_id, dedupe_key\) DO NOTHING/i);
+    assert.doesNotMatch(
+      identityReconciliationSql,
+      /market_price|previous_close|quantity|allocation|pnl/i,
+    );
+  });
+
   it("adds backward-compatible company identity fields", () => {
     const companyColumns = columnNames("researchCompaniesTable");
 

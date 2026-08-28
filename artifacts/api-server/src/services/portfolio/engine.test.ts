@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculatePortfolio } from "./engine";
+import { calculatePortfolio, visiblePortfolioRiskFlags } from "./engine";
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+test("hides legacy cash warnings from user-facing risk flags", () => {
+  assert.deepEqual(
+    visiblePortfolioRiskFlags([
+      "Cash buffer is below 5% of total portfolio value.",
+      "ETF is 53.5% of invested assets.",
+    ]),
+    ["ETF is 53.5% of invested assets."],
+  );
+});
 
 test("calculates average cost, cash and unrealized P&L from the ledger", () => {
   const result = calculatePortfolio(
@@ -31,19 +41,6 @@ test("calculates average cost, cash and unrealized P&L from the ledger", () => {
   assert.equal(result.holdings[0].unrealizedPnl, 190);
   assert.equal(result.holdings[0].dayChange, 5);
   assert.ok(result.xirrPct !== null);
-});
-
-test("uses a direct cash balance without requiring a cash transaction", () => {
-  const result = calculatePortfolio(
-    [{ type: "buy", ticker: "TEST", quantity: 10, price: 100, tradeDate: day("2025-01-02") }],
-    [{ ticker: "TEST", price: 120 }],
-    day("2026-01-01"),
-    25_000,
-  );
-  assert.equal(result.cashBalance, 25_000);
-  assert.equal(result.marketValue, 1_200);
-  assert.equal(result.totalValue, 26_200);
-  assert.equal(result.totalPnl, 200);
 });
 
 test("uses weighted average cost for a partial sell", () => {

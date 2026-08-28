@@ -186,7 +186,9 @@ function getOrCreatePosition(
 
 function calculateXirr(cashFlows: CashFlow[]): number | null {
   const filtered = cashFlows
-    .filter((flow) => Number.isFinite(flow.amount) && Math.abs(flow.amount) > EPSILON)
+    .filter(
+      (flow) => Number.isFinite(flow.amount) && Math.abs(flow.amount) > EPSILON,
+    )
     .sort((a, b) => a.date.getTime() - b.date.getTime());
 
   if (filtered.length < 2) return null;
@@ -210,9 +212,7 @@ function calculateXirr(cashFlows: CashFlow[]): number | null {
     filtered.reduce((sum, flow, index) => {
       if (years[index] === 0) return sum;
       return (
-        sum -
-        (years[index] * flow.amount) /
-          (1 + rate) ** (years[index] + 1)
+        sum - (years[index] * flow.amount) / (1 + rate) ** (years[index] + 1)
       );
     }, 0);
 
@@ -234,7 +234,11 @@ function calculateXirr(cashFlows: CashFlow[]): number | null {
   let lowerValue = npv(lower);
   let upperValue = npv(upper);
 
-  for (let expansion = 0; expansion < 50 && lowerValue * upperValue > 0; expansion += 1) {
+  for (
+    let expansion = 0;
+    expansion < 50 && lowerValue * upperValue > 0;
+    expansion += 1
+  ) {
     upper *= 2;
     upperValue = npv(upper);
   }
@@ -263,14 +267,18 @@ function round(value: number, decimals = 8): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
+export function visiblePortfolioRiskFlags(flags: string[]): string[] {
+  return flags.filter((flag) => !/\bcash(?:\s+buffer)?\b/i.test(flag));
+}
+
 export function calculatePortfolio(
   inputTransactions: EngineTransaction[],
   quotes: MarketQuote[] = [],
   asOf = new Date(),
-  cashBalanceOverride?: number,
 ): PortfolioCalculation {
   const transactions = [...inputTransactions].sort((a, b) => {
-    const dateDifference = toDate(a.tradeDate).getTime() - toDate(b.tradeDate).getTime();
+    const dateDifference =
+      toDate(a.tradeDate).getTime() - toDate(b.tradeDate).getTime();
     if (dateDifference !== 0) return dateDifference;
     return String(a.id ?? "").localeCompare(String(b.id ?? ""));
   });
@@ -347,7 +355,9 @@ export function calculatePortfolio(
       case "bonus": {
         const position = getOrCreatePosition(positions, transaction);
         if (position.quantity <= EPSILON) {
-          throw new Error(`Cannot apply bonus shares to ${position.ticker} without a position`);
+          throw new Error(
+            `Cannot apply bonus shares to ${position.ticker} without a position`,
+          );
         }
         position.quantity += positive(transaction.quantity, "bonus quantity");
         break;
@@ -359,7 +369,10 @@ export function calculatePortfolio(
         if (!position || position.quantity <= EPSILON) {
           throw new Error(`Cannot apply split to ${ticker} without a position`);
         }
-        const numerator = positive(transaction.splitNumerator, "split numerator");
+        const numerator = positive(
+          transaction.splitNumerator,
+          "split numerator",
+        );
         const denominator = positive(
           transaction.splitDenominator,
           "split denominator",
@@ -442,54 +455,65 @@ export function calculatePortfolio(
     };
   });
 
-  if (cashBalanceOverride !== undefined) {
-    if (!Number.isFinite(cashBalanceOverride) || cashBalanceOverride < 0) {
-      throw new Error("Cash balance must be zero or greater");
-    }
-    netContributions += cashBalanceOverride - cashBalance;
-    cashBalance = cashBalanceOverride;
-  }
-
-  const marketValue = provisional.reduce((sum, item) => sum + item.marketValue, 0);
+  const marketValue = provisional.reduce(
+    (sum, item) => sum + item.marketValue,
+    0,
+  );
   const totalValue = marketValue + cashBalance;
   const allocationDenominator = totalValue > EPSILON ? totalValue : marketValue;
 
   const holdings: CalculatedHolding[] = provisional
-    .map(({ position, quote, marketPrice, previousClose, marketValue: value, unrealizedPnl }) => {
-      const averageCost = position.costBasis / position.quantity;
-      const dayChange = marketPrice - previousClose;
-      return {
-        ticker: position.ticker,
-        name: position.name,
-        exchange: position.exchange,
-        sector: position.sector,
-        quantity: round(position.quantity),
-        averageCost: round(averageCost),
-        marketPrice: round(marketPrice),
-        previousClose: round(previousClose),
-        marketValue: round(value),
-        costBasis: round(position.costBasis),
-        unrealizedPnl: round(unrealizedPnl),
-        unrealizedPnlPct:
-          position.costBasis > EPSILON
-            ? round((unrealizedPnl / position.costBasis) * 100)
-            : 0,
-        realizedPnl: round(position.realizedPnl),
-        dayChange: round(dayChange),
-        dayChangePct:
-          previousClose > EPSILON ? round((dayChange / previousClose) * 100) : 0,
-        allocationPct:
-          allocationDenominator > EPSILON
-            ? round((value / allocationDenominator) * 100)
-            : 0,
-        firstTradeDate: position.firstTradeDate,
-        priceSource: quote ? ("quote" as const) : ("last_transaction" as const),
-        brokers: [...position.brokers].sort(),
-      };
-    })
+    .map(
+      ({
+        position,
+        quote,
+        marketPrice,
+        previousClose,
+        marketValue: value,
+        unrealizedPnl,
+      }) => {
+        const averageCost = position.costBasis / position.quantity;
+        const dayChange = marketPrice - previousClose;
+        return {
+          ticker: position.ticker,
+          name: position.name,
+          exchange: position.exchange,
+          sector: position.sector,
+          quantity: round(position.quantity),
+          averageCost: round(averageCost),
+          marketPrice: round(marketPrice),
+          previousClose: round(previousClose),
+          marketValue: round(value),
+          costBasis: round(position.costBasis),
+          unrealizedPnl: round(unrealizedPnl),
+          unrealizedPnlPct:
+            position.costBasis > EPSILON
+              ? round((unrealizedPnl / position.costBasis) * 100)
+              : 0,
+          realizedPnl: round(position.realizedPnl),
+          dayChange: round(dayChange),
+          dayChangePct:
+            previousClose > EPSILON
+              ? round((dayChange / previousClose) * 100)
+              : 0,
+          allocationPct:
+            allocationDenominator > EPSILON
+              ? round((value / allocationDenominator) * 100)
+              : 0,
+          firstTradeDate: position.firstTradeDate,
+          priceSource: quote
+            ? ("quote" as const)
+            : ("last_transaction" as const),
+          brokers: [...position.brokers].sort(),
+        };
+      },
+    )
     .sort((a, b) => b.marketValue - a.marketValue);
 
-  const costBasis = holdings.reduce((sum, holding) => sum + holding.costBasis, 0);
+  const costBasis = holdings.reduce(
+    (sum, holding) => sum + holding.costBasis,
+    0,
+  );
   const unrealizedPnl = holdings.reduce(
     (sum, holding) => sum + holding.unrealizedPnl,
     0,
@@ -534,7 +558,9 @@ export function calculatePortfolio(
   const largestPosition = holdings[0] ?? null;
   const largestPositionPct = largestPosition?.allocationPct ?? 0;
   const topFiveConcentrationPct = round(
-    holdings.slice(0, 5).reduce((sum, holding) => sum + holding.allocationPct, 0),
+    holdings
+      .slice(0, 5)
+      .reduce((sum, holding) => sum + holding.allocationPct, 0),
   );
   const concentrationRisk: PortfolioCalculation["concentrationRisk"] =
     largestPositionPct > 25 || topFiveConcentrationPct > 80
@@ -544,9 +570,6 @@ export function calculatePortfolio(
         : "low";
 
   const riskFlags: string[] = [];
-  if (cashBalance < -EPSILON) {
-    riskFlags.push("Cash balance is negative; imported funding transactions may be incomplete.");
-  }
   if (largestPositionPct > 20 && largestPosition) {
     riskFlags.push(
       `${largestPosition.ticker} is ${largestPositionPct.toFixed(1)}% of total portfolio value.`,
@@ -559,9 +582,6 @@ export function calculatePortfolio(
     riskFlags.push(
       `${concentratedSector.sector} is ${concentratedSector.allocationPct.toFixed(1)}% of invested assets.`,
     );
-  }
-  if (totalValue > EPSILON && (cashBalance / totalValue) * 100 < 5) {
-    riskFlags.push("Cash buffer is below 5% of total portfolio value.");
   }
   const stalePriceTickers = holdings
     .filter((holding) => holding.priceSource === "last_transaction")

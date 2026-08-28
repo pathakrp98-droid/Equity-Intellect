@@ -179,7 +179,7 @@ export function inferMode(question: string, selected?: CopilotMode): CopilotMode
   if (/performance|return|p&l|pnl|xirr|attribution|why.*moved/.test(value)) {
     return "performance_explain";
   }
-  if (/portfolio|allocation|concentration|risk|cash buffer/.test(value)) {
+  if (/portfolio|allocation|concentration|risk/.test(value)) {
     return "portfolio_review";
   }
   if (/thesis|company|stock|holding|valuation/.test(value)) {
@@ -319,10 +319,10 @@ export function generateOfflineAnswer(
       unknowns.push("Portfolio snapshot is unavailable.");
     } else {
       const top = holdings.slice(0, 5);
-      summary = `Portfolio value ${money(snapshot.totalValue)}, return ${pct(snapshot.totalReturnPct)}, cash ${money(snapshot.cashBalance)}.`;
+      summary = `Portfolio value ${money(snapshot.totalValue)}, return ${pct(snapshot.totalReturnPct)}.`;
       answer = [
         `Your portfolio is valued at ${money(snapshot.totalValue)} with total P&L of ${money(snapshot.totalPnl)} and a recorded return of ${pct(snapshot.totalReturnPct)}.${sourceTag(pSource)}`,
-        `Cash is ${money(snapshot.cashBalance)} and the largest position is ${snapshot.largestPositionTicker ?? "not identified"} at ${pct(snapshot.largestPositionPct)}.${sourceTag(pSource)}`,
+        `The largest position is ${snapshot.largestPositionTicker ?? "not identified"} at ${pct(snapshot.largestPositionPct)}.${sourceTag(pSource)}`,
         top.length
           ? `The largest holdings are ${top.map((item) => `${item.ticker} (${pct(item.allocationPct)})`).join(", ")}.${sourceTag(pSource)}`
           : "No active equity holdings are recorded.",
@@ -330,7 +330,6 @@ export function generateOfflineAnswer(
       keyPoints.push(
         `Total value: ${money(snapshot.totalValue)}`,
         `Total return: ${pct(snapshot.totalReturnPct)}`,
-        `Cash balance: ${money(snapshot.cashBalance)}`,
       );
       if ((snapshot.largestPositionPct ?? 0) > 20) {
         risks.push(
@@ -339,7 +338,7 @@ export function generateOfflineAnswer(
       }
       risks.push(...(snapshot.riskFlags ?? []).slice(0, 5));
       citations.push(
-        ...citation(pSource, "Portfolio value, return, cash and concentration metrics."),
+        ...citation(pSource, "Portfolio value, return and concentration metrics."),
       );
     }
   } else if (input.mode === "performance_explain") {

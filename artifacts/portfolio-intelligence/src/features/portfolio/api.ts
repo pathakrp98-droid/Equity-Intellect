@@ -302,17 +302,6 @@ export function useImportHoldingsCsv() {
   });
 }
 
-export function useSetCashBalance() {
-  const refresh = useRefreshPortfolio();
-  return useMutation({
-    mutationFn: (balance: number) => apiRequest("/api/portfolio/cash", {
-      method: "PUT",
-      body: JSON.stringify({ balance }),
-    }),
-    onSuccess: refresh,
-  });
-}
-
 export function useCreateDirectHolding() {
   const refresh = useRefreshPortfolio();
   return useMutation({

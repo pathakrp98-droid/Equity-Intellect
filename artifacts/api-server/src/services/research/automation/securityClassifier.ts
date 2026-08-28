@@ -53,7 +53,13 @@ export function classifySecurity(
     candidates.add("mutual_fund");
     reasons.push("The security name explicitly identifies a mutual fund.");
   }
-  if (!isUnlistedExchange && isListedExchange && (isin.length > 0 || hasEquityName)) {
+  if (
+    !isUnlistedExchange &&
+    isListedExchange &&
+    !hasEtfName &&
+    !hasMutualFundName &&
+    (isin.length > 0 || hasEquityName)
+  ) {
     candidates.add("equity");
     if (isin.length > 0) reasons.push(`${exchange} listing and ISIN support listed equity classification.`);
     if (hasEquityName) reasons.push("The security name uses a listed-company convention.");

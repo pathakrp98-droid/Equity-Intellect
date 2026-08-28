@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildResearchSnapshotAlertCandidates,
   evaluateRule,
+  evaluateSystemPortfolioAlerts,
   isRuleCoolingDown,
   meetsSeverityThreshold,
 } from "./alertEngine";
@@ -18,7 +19,10 @@ test("severity threshold works in the expected direction", () => {
 test("cooldown prevents repeated alerts", () => {
   assert.equal(
     isRuleCoolingDown(
-      { cooldownMinutes: 60, lastTriggeredAt: new Date(now.getTime() - 30 * 60_000) },
+      {
+        cooldownMinutes: 60,
+        lastTriggeredAt: new Date(now.getTime() - 30 * 60_000),
+      },
       now,
     ),
     true,
@@ -159,4 +163,77 @@ test("a material but non-deteriorating snapshot does not create an alert", () =>
     now,
   );
   assert.deepEqual(candidates, []);
+});
+
+test("system monitoring detects research targets, large moves and concentration", () => {
+  const candidates = evaluateSystemPortfolioAlerts({
+    now,
+    holdings: [
+      {
+        ticker: "RELIANCE",
+        name: "Reliance Industries",
+        marketPrice: 3050,
+        dayChangePct: 5.4,
+        allocationPct: 31,
+        priceSource: "quote",
+        priceAsOf: now,
+      },
+    ],
+    sectorAllocations: [
+      {
+        sector: "Energy",
+        allocationPct: 42,
+      },
+    ],
+    theses: [
+      {
+        ticker: "RELIANCE",
+        name: "Reliance Industries",
+        status: "intact",
+        nextReviewAt: null,
+        targetPrice: 3000,
+      },
+    ],
+    concentrationPct: 25,
+    sectorConcentrationPct: 35,
+  });
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.metadata.category).sort(),
+    ["concentration", "concentration", "large_move", "target_price"],
+  );
+  assert.ok(
+    candidates.some(
+      (candidate) =>
+        candidate.metadata.category === "concentration" &&
+        candidate.metadata.concentrationKind === "sector" &&
+        candidate.metadata.sector === "Energy",
+    ),
+  );
+});
+
+test("system monitoring stays quiet below automatic thresholds", () => {
+  const candidates = evaluateSystemPortfolioAlerts({
+    now,
+    holdings: [
+      {
+        ticker: "TCS",
+        name: "TCS",
+        marketPrice: 3900,
+        dayChangePct: 1.2,
+        allocationPct: 12,
+        priceSource: "manual",
+        priceAsOf: now,
+      },
+    ],
+    theses: [
+      {
+        ticker: "TCS",
+        name: "TCS",
+        status: "intact",
+        nextReviewAt: null,
+        targetPrice: 4200,
+      },
+    ],
+  });
+  assert.equal(candidates.length, 0);
 });
