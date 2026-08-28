@@ -17,6 +17,22 @@ export interface IntegrationModuleResult {
 export interface IntegrationHealth {
   checkedAt: string;
   databaseReady: boolean;
+  facts: {
+    research: {
+      companies: number;
+      activeTheses: number;
+      brokenTheses: number;
+      overdueReviews: number;
+      current: number;
+      limited: number;
+      stale: number;
+      failed: number;
+      queued: number;
+      running: number;
+      latestSuccessfulAt: string | null;
+      providerConfigured: boolean;
+    };
+  };
   readiness: {
     score: number;
     band: "ready" | "nearly_ready" | "setup_required";

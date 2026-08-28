@@ -145,6 +145,48 @@ test("approves a complete proposal inside portfolio limits", () => {
   assert.equal(result.stressTestResults.length, 6);
 });
 
+test("limited automated research is covered but cannot silently approve new capital", () => {
+  const result = runGuardianCheck({
+    proposal: completeProposal,
+    portfolio,
+    research: {
+      ...research,
+      researchOrigin: "automated",
+      evidenceStrength: "limited",
+      freshnessStatus: "current",
+    },
+    market: null,
+    settings,
+  });
+
+  assert.equal(result.decision, "require_evidence");
+  assert.ok(
+    result.preTradeFailures.some((item) => item.field === "researchEvidence"),
+  );
+});
+
+test("stale automated broken judgement requests evidence instead of hard-blocking", () => {
+  const result = runGuardianCheck({
+    proposal: completeProposal,
+    portfolio,
+    research: {
+      ...research,
+      thesisStatus: "broken",
+      researchOrigin: "automated",
+      evidenceStrength: "strong",
+      freshnessStatus: "stale",
+    },
+    market: null,
+    settings,
+  });
+
+  assert.equal(
+    result.hardRuleBreaches.some((item) => item.ruleId === "BROKEN_THESIS"),
+    false,
+  );
+  assert.equal(result.decision, "require_evidence");
+});
+
 test("blocks a buy that breaches stock concentration", () => {
   const result = runGuardianCheck({
     proposal: { ...completeProposal, quantity: 100 },

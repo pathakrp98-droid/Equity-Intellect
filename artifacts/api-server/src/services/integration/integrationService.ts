@@ -1,5 +1,6 @@
 import {
   alertRulesTable,
+  automatedResearchSnapshotsTable,
   copilotConversationsTable,
   copilotMemoriesTable,
   db,
@@ -18,6 +19,7 @@ import {
   portfolioTransactionsTable,
   portfoliosTable,
   researchCompaniesTable,
+  researchAutomationJobsTable,
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm";
 
@@ -121,6 +123,86 @@ class IntegrationService {
           .from(investmentThesesTable)
           .where(inArray(investmentThesesTable.companyId, companyIds))
       : [];
+    const [automatedSnapshots, automationJobs] = companyIds.length
+      ? await Promise.all([
+          db
+            .select()
+            .from(automatedResearchSnapshotsTable)
+            .innerJoin(
+              researchAutomationJobsTable,
+              and(
+                eq(
+                  researchAutomationJobsTable.id,
+                  automatedResearchSnapshotsTable.jobId,
+                ),
+                eq(researchAutomationJobsTable.userId, userId),
+                eq(researchAutomationJobsTable.status, "succeeded"),
+              ),
+            )
+            .where(
+              and(
+                eq(automatedResearchSnapshotsTable.userId, userId),
+                inArray(automatedResearchSnapshotsTable.companyId, companyIds),
+              ),
+            )
+            .orderBy(desc(automatedResearchSnapshotsTable.version)),
+          db
+            .select()
+            .from(researchAutomationJobsTable)
+            .where(
+              and(
+                eq(researchAutomationJobsTable.userId, userId),
+                inArray(researchAutomationJobsTable.companyId, companyIds),
+              ),
+            )
+            .orderBy(
+              desc(researchAutomationJobsTable.createdAt),
+              desc(researchAutomationJobsTable.id),
+            ),
+        ])
+      : [[], []];
+    const latestSnapshotByCompany = new Map<
+      number,
+      (typeof automatedSnapshots)[number]["automated_research_snapshots"]
+    >();
+    for (const row of automatedSnapshots) {
+      const snapshot = row.automated_research_snapshots;
+      if (!latestSnapshotByCompany.has(snapshot.companyId))
+        latestSnapshotByCompany.set(snapshot.companyId, snapshot);
+    }
+    const latestAutomationJobByCompany = new Map<
+      number,
+      (typeof automationJobs)[number]
+    >();
+    for (const job of automationJobs) {
+      if (!latestAutomationJobByCompany.has(job.companyId))
+        latestAutomationJobByCompany.set(job.companyId, job);
+    }
+    const researchAutomation = {
+      current: 0,
+      limited: 0,
+      stale: 0,
+      failed: 0,
+      queued: 0,
+      running: 0,
+    };
+    for (const company of companies) {
+      const snapshot = latestSnapshotByCompany.get(company.id);
+      const job = latestAutomationJobByCompany.get(company.id);
+      if (job?.status === "running") researchAutomation.running += 1;
+      else if (job?.status === "queued") researchAutomation.queued += 1;
+      else if (
+        job &&
+        ["failed", "partial", "dead_letter"].includes(job.status) &&
+        (!snapshot || job.createdAt >= snapshot.publishedAt)
+      )
+        researchAutomation.failed += 1;
+      else if (snapshot?.validUntil && snapshot.validUntil <= now)
+        researchAutomation.stale += 1;
+      else if (snapshot?.evidenceStrength === "limited")
+        researchAutomation.limited += 1;
+      else if (snapshot) researchAutomation.current += 1;
+    }
 
     const conversations = await db
       .select({ id: copilotConversationsTable.id })
@@ -240,6 +322,19 @@ class IntegrationService {
             thesis.nextReviewAt !== null &&
             new Date(thesis.nextReviewAt) <= now,
         ).length,
+        ...researchAutomation,
+        latestSuccessfulAt: iso(
+          automatedSnapshots.length
+            ? new Date(
+                Math.max(
+                  ...automatedSnapshots.map((row) =>
+                    row.automated_research_snapshots.publishedAt.getTime(),
+                  ),
+                ),
+              )
+            : null,
+        ),
+        providerConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
       },
       copilot: {
         conversations: conversations.length,

@@ -11,12 +11,18 @@ import intelligenceRouter from "./intelligence";
 import journalRouter from "./journal";
 import liveDataRouter from "./liveData";
 import integrationRouter from "./integration";
+import { createResearchAutomationRouter } from "./researchAutomation";
+import { researchAutomationApiService } from "../services/research/automation/researchAutomationApiService";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use("/portfolio", portfolioRouter);
+router.use(
+  "/research/automation",
+  createResearchAutomationRouter(researchAutomationApiService),
+);
 router.use("/research", researchRouter);
 router.use("/alerts", alertsRouter);
 router.use("/copilot", copilotRouter);

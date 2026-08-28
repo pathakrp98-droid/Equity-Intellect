@@ -7,11 +7,13 @@ import {
   marketNewsTable,
   marketProviderRunsTable,
   morningBriefsTable,
+  researchAutomationTriggerEventsTable,
   researchCompaniesTable,
 } from "@workspace/db";
 import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
 
 import { portfolioService } from "../portfolio/portfolioService";
+import { buildMaterialResearchTriggers } from "../research/automation/researchTriggers";
 import { researchService } from "../research/researchService";
 import { guardianService } from "../guardian/guardianService";
 import { buildMorningBrief } from "./briefEngine";
@@ -141,6 +143,11 @@ class MarketIntelligenceService {
       { ...payload, provider: providerOverride ?? payload.provider },
       tickers,
     );
+    const researchTriggers = buildMaterialResearchTriggers(
+      userId,
+      normalized,
+      new Set(tickers.map((ticker) => ticker.trim().toUpperCase())),
+    );
 
     await db.transaction(async (tx) => {
       for (const point of normalized.points) {
@@ -214,6 +221,17 @@ class MarketIntelligenceService {
               metadata: event.metadata,
               updatedAt: new Date(),
             },
+          });
+      }
+      if (researchTriggers.length > 0) {
+        await tx
+          .insert(researchAutomationTriggerEventsTable)
+          .values(researchTriggers)
+          .onConflictDoNothing({
+            target: [
+              researchAutomationTriggerEventsTable.userId,
+              researchAutomationTriggerEventsTable.dedupeKey,
+            ],
           });
       }
     });
@@ -393,17 +411,44 @@ class MarketIntelligenceService {
         )
         .where(eq(researchCompaniesTable.userId, userId)),
     ]);
+    const automatedSignals = await researchService.getAutomatedSignals(
+      userId,
+      companies.map((company) => company.ticker),
+    );
     const detailByTicker = new Map(thesisRows.map((row) => [row.ticker, row]));
     return companies
       .filter((company) => company.isHolding)
-      .map((company) => ({
-        ticker: company.ticker,
-        conviction: company.conviction,
-        status: company.thesisStatus,
-        completenessScore: company.completenessScore,
-        nextReviewAt: detailByTicker.get(company.ticker)?.nextReviewAt ?? null,
-        targetPrice: detailByTicker.get(company.ticker)?.targetPrice ?? null,
-      }));
+      .map((company) => {
+        const automated = automatedSignals.get(company.ticker);
+        if (automated?.researchOrigin === "automated") {
+          return {
+            ticker: company.ticker,
+            conviction: "watch",
+            status: automated.thesisStatus,
+            completenessScore: automated.completenessScore,
+            nextReviewAt: null,
+            targetPrice: automated.targetPrice,
+            researchOrigin: "automated" as const,
+            snapshotVersion: automated.snapshotVersion,
+            generatedAt: automated.generatedAt,
+            freshnessStatus: automated.freshnessStatus,
+            evidenceStrength: automated.evidenceStrength,
+            materialChange: automated.materialChange,
+            topRisks: automated.topRisks,
+            catalysts: automated.catalysts,
+            sourceLinks: automated.sources.map((source) => source.url),
+          };
+        }
+        return {
+          ticker: company.ticker,
+          conviction: company.conviction,
+          status: company.thesisStatus,
+          completenessScore: company.completenessScore,
+          nextReviewAt: detailByTicker.get(company.ticker)?.nextReviewAt ?? null,
+          targetPrice: detailByTicker.get(company.ticker)?.targetPrice ?? null,
+          researchOrigin: company.isCovered ? ("manual" as const) : ("none" as const),
+        };
+      });
   }
 
   async generateBrief(userId: string, now = new Date()) {
@@ -414,6 +459,7 @@ class MarketIntelligenceService {
       news,
       events,
       researchSignals,
+      latestBrief,
       guardian,
     ] = await Promise.all([
       portfolioService.getOverview(userId),
@@ -422,10 +468,16 @@ class MarketIntelligenceService {
       this.getNews(userId, { portfolioOnly: true, days: 14, limit: 100 }),
       this.getCalendar(userId, { portfolioOnly: true, days: 30 }),
       this.getResearchSignals(userId),
+      db
+        .select({ generatedAt: morningBriefsTable.generatedAt })
+        .from(morningBriefsTable)
+        .where(eq(morningBriefsTable.userId, userId))
+        .orderBy(desc(morningBriefsTable.generatedAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
       guardianService.getHealth(userId, false),
     ]);
-    if (!overview.snapshot)
-      throw new Error("Portfolio snapshot is unavailable");
+    if (!overview.snapshot) throw new Error("Portfolio snapshot is unavailable");
 
     const briefInput = {
       now,
@@ -459,6 +511,7 @@ class MarketIntelligenceService {
         priceAsOf: holding.priceAsOf,
       })),
       researchSignals,
+      researchChangesSince: latestBrief?.generatedAt ?? null,
       marketPoints: points as BriefMarketPoint[],
       news: news as BriefNewsItem[],
       events: events as BriefEventItem[],
@@ -470,7 +523,7 @@ class MarketIntelligenceService {
       },
     };
     const provisionalBrief = buildMorningBrief(briefInput);
-    const [previousBrief] = await db
+    const [previousDatedBrief] = await db
       .select({
         briefDate: morningBriefsTable.briefDate,
         portfolioPulse: morningBriefsTable.portfolioPulse,
@@ -487,11 +540,11 @@ class MarketIntelligenceService {
       .limit(1);
     const brief = buildMorningBrief({
       ...briefInput,
-      previousBrief: previousBrief
+      previousBrief: previousDatedBrief
         ? {
-            briefDate: previousBrief.briefDate,
-            portfolioPulse: previousBrief.portfolioPulse,
-            priorityActions: previousBrief.priorityActions,
+            briefDate: previousDatedBrief.briefDate,
+            portfolioPulse: previousDatedBrief.portfolioPulse,
+            priorityActions: previousDatedBrief.priorityActions,
           }
         : null,
     });

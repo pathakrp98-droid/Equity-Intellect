@@ -18,6 +18,7 @@ export interface MorningBriefActionResult {
   rationale: string;
   actionType: "review" | "research" | "monitor" | "rebalance" | "verify_data";
   sourceIds: string[];
+  sourceLinks?: string[];
 }
 
 export interface MorningBriefRiskResult {
@@ -27,6 +28,7 @@ export interface MorningBriefRiskResult {
   title: string;
   detail: string;
   sourceIds: string[];
+  sourceLinks?: string[];
 }
 
 export interface MorningBriefResult {
@@ -124,6 +126,7 @@ export interface BuildMorningBriefInput {
   portfolio: BriefPortfolioSnapshot;
   holdings: BriefHolding[];
   researchSignals: BriefResearchSignal[];
+  researchChangesSince?: Date | null;
   marketPoints: BriefMarketPoint[];
   news: BriefNewsItem[];
   events: BriefEventItem[];
@@ -419,8 +422,41 @@ export function buildMorningBrief(
   }
 
   for (const signal of input.researchSignals) {
-    const statusRisk =
-      signal.status === "broken" || signal.status === "weakening";
+    if (signal.researchOrigin === "automated") {
+      const generatedAfterPreviousBrief =
+        !input.researchChangesSince ||
+        Boolean(
+          signal.generatedAt && signal.generatedAt > input.researchChangesSince,
+        );
+      if (signal.materialChange?.material && generatedAfterPreviousBrief) {
+        const sourceIds = [researchSourceId(signal.ticker)];
+        const sourceLinks = signal.sourceLinks ?? [];
+        const deteriorated = ["weakening", "broken"].includes(signal.status);
+        actions.push({
+          id: `research-change-${signal.ticker}-${signal.snapshotVersion ?? "latest"}`,
+          priority: deteriorated ? "high" : "medium",
+          ticker: signal.ticker,
+          title: `${signal.ticker}: automated research changed`,
+          rationale: `AI judgement: ${signal.materialChange.headline}${signal.topRisks?.[0] ? ` Key risk: ${signal.topRisks[0]}` : ""}`,
+          actionType: "review",
+          sourceIds,
+          sourceLinks,
+        });
+        if (deteriorated || (signal.topRisks?.length ?? 0) > 0) {
+          risks.push({
+            id: `research-change-risk-${signal.ticker}-${signal.snapshotVersion ?? "latest"}`,
+            severity: signal.status === "broken" ? "high" : "medium",
+            ticker: signal.ticker,
+            title: `${signal.ticker} evidence-based assessment changed`,
+            detail: `AI judgement: ${signal.topRisks?.[0] ?? signal.materialChange.headline}`,
+            sourceIds,
+            sourceLinks,
+          });
+        }
+      }
+      continue;
+    }
+    const statusRisk = signal.status === "broken" || signal.status === "weakening";
     if (statusRisk) {
       risks.push({
         id: `thesis-${signal.ticker}`,

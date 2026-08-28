@@ -8,6 +8,7 @@ import {
   portfolioSnapshotsTable,
   portfolioTransactionsTable,
   portfoliosTable,
+  researchAutomationTriggerEventsTable,
   type InsertPortfolioTransaction,
 } from "@workspace/db";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -26,6 +27,7 @@ import {
   visiblePortfolioRiskFlags,
 } from "./engine";
 import { buildHoldingsCsvTemplate, parseHoldingsCsv } from "./holdingsCsv";
+import { buildHoldingResearchTrigger } from "../research/automation/researchTriggers";
 
 export interface CreateTransactionInput {
   portfolioId?: number;
@@ -573,6 +575,26 @@ export class PortfolioService {
       prices.map(asMarketQuote),
       new Date(),
     );
+    const directByTicker = new Map(
+      directHoldings.map((holding) => [
+        holding.symbol.trim().toUpperCase(),
+        holding,
+      ]),
+    );
+    const researchTrigger = buildHoldingResearchTrigger(
+      userId,
+      portfolio.id,
+      calculation.holdings.map((holding) => {
+        const direct = directByTicker.get(holding.ticker.trim().toUpperCase());
+        return {
+          ticker: holding.ticker,
+          name: holding.name ?? direct?.name ?? null,
+          exchange: holding.exchange || direct?.exchange || null,
+          sector: holding.sector ?? direct?.sector ?? null,
+          isin: direct?.isin ?? null,
+        };
+      }),
+    );
 
     await db.transaction(async (tx) => {
       await tx
@@ -652,6 +674,16 @@ export class PortfolioService {
         .update(portfoliosTable)
         .set({ updatedAt: calculation.asOf })
         .where(eq(portfoliosTable.id, portfolio.id));
+
+      await tx
+        .insert(researchAutomationTriggerEventsTable)
+        .values(researchTrigger)
+        .onConflictDoNothing({
+          target: [
+            researchAutomationTriggerEventsTable.userId,
+            researchAutomationTriggerEventsTable.dedupeKey,
+          ],
+        });
     });
 
     return calculation;

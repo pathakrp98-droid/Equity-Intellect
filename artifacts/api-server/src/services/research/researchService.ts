@@ -1,18 +1,32 @@
 import {
+  automatedResearchSnapshotsTable,
+  automatedResearchSourcesTable,
   investmentThesesTable,
   portfolioHoldingsTable,
   portfoliosTable,
+  researchAutomationJobsTable,
   researchCatalystsTable,
   researchCompaniesTable,
+  researchCoverageTargetsTable,
   researchInvalidationTriggersTable,
   researchNotesTable,
   researchRisksTable,
   researchValuationAssumptionsTable,
   db,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import type {
+  CoverageState,
+  IdentityStatus,
+} from "@workspace/research-contracts";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 
 import { calculateResearchCompleteness } from "./completeness";
+import {
+  buildAutomatedResearchSignal,
+  type AutomatedResearchSignal,
+} from "./automatedResearchSignals";
+
+export type { AutomatedResearchSignal } from "./automatedResearchSignals";
 
 export type ResearchConviction = "high" | "medium" | "low" | "watch";
 export type ThesisStatus =
@@ -147,6 +161,8 @@ interface ResearchCompanyListRow {
   marketValue: number;
   allocationPct: number;
   isArchived: boolean;
+  identityStatus: IdentityStatus | null;
+  automationState: CoverageState | null;
 }
 
 interface ThesisSignal {
@@ -164,6 +180,57 @@ function normalizeTicker(value: string): string {
   return ticker;
 }
 
+export function buildResearchHoldingCoverageMap<
+  Holding extends { ticker: string; marketValue: number },
+>(
+  companies: Array<{ id: number; ticker: string }>,
+  targets: Array<{ companyId: number; ticker: string; isActive: boolean }>,
+  holdings: Holding[],
+): {
+  holdingByCompanyId: Map<number, Holding>;
+  coveredHoldingTickers: Set<string>;
+  holdingByTicker: Map<string, Holding>;
+} {
+  const holdingByTicker = new Map<string, Holding>();
+  for (const holding of holdings) {
+    const ticker = normalizeTicker(holding.ticker);
+    const existing = holdingByTicker.get(ticker);
+    if (!existing || holding.marketValue > existing.marketValue) {
+      holdingByTicker.set(ticker, holding);
+    }
+  }
+
+  const activeTargetTickersByCompany = new Map<number, Set<string>>();
+  for (const target of targets) {
+    if (!target.isActive) continue;
+    const tickers =
+      activeTargetTickersByCompany.get(target.companyId) ?? new Set();
+    tickers.add(normalizeTicker(target.ticker));
+    activeTargetTickersByCompany.set(target.companyId, tickers);
+  }
+
+  const holdingByCompanyId = new Map<number, Holding>();
+  const coveredHoldingTickers = new Set<string>();
+  for (const company of companies) {
+    const candidateTickers = new Set(
+      activeTargetTickersByCompany.get(company.id) ?? [],
+    );
+    candidateTickers.add(normalizeTicker(company.ticker));
+    let selected: Holding | undefined;
+    for (const ticker of candidateTickers) {
+      const holding = holdingByTicker.get(ticker);
+      if (!holding) continue;
+      coveredHoldingTickers.add(ticker);
+      if (!selected || holding.marketValue > selected.marketValue) {
+        selected = holding;
+      }
+    }
+    if (selected) holdingByCompanyId.set(company.id, selected);
+  }
+
+  return { holdingByCompanyId, coveredHoldingTickers, holdingByTicker };
+}
+
 function cleanText(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
   const cleaned = value.trim();
@@ -178,6 +245,73 @@ function countByCompany(
     counts.set(row.companyId, (counts.get(row.companyId) ?? 0) + 1);
   }
   return counts;
+}
+
+export function mergeAutomatedResearchListFields<
+  T extends {
+    currentPrice: number | null;
+    previousClose: number | null;
+  },
+>(
+  legacy: T,
+  input: {
+    holding: {
+      marketPrice: number | null;
+      previousClose: number | null;
+    } | null;
+    identityStatus: IdentityStatus | null;
+    automationState: CoverageState | null;
+  },
+): T & {
+  identityStatus: IdentityStatus | null;
+  automationState: CoverageState | null;
+} {
+  return {
+    ...legacy,
+    currentPrice: input.holding?.marketPrice ?? legacy.currentPrice,
+    previousClose: input.holding?.previousClose ?? legacy.previousClose,
+    identityStatus: input.identityStatus,
+    automationState: input.automationState,
+  };
+}
+
+export function deriveResearchAutomationState(input: {
+  identityStatus: IdentityStatus;
+  automationEnabled: boolean;
+  hasAnyTarget: boolean;
+  hasActiveTarget: boolean;
+  latestJob: {
+    status: string;
+    createdAt: Date;
+  } | null;
+  latestSnapshot: {
+    evidenceStrength: "strong" | "moderate" | "limited";
+    validUntil: Date;
+    publishedAt: Date;
+  } | null;
+  now: Date;
+}): CoverageState | null {
+  if (input.hasAnyTarget && !input.hasActiveTarget) return "archived";
+  if (input.identityStatus === "needs_identity") return "needs_identity";
+  if (!input.automationEnabled) return null;
+  if (input.latestJob?.status === "running") return "running";
+  if (input.latestJob?.status === "queued") return "queued";
+  if (
+    input.latestJob &&
+    ["failed", "partial", "dead_letter"].includes(input.latestJob.status) &&
+    (!input.latestSnapshot ||
+      input.latestJob.createdAt >= input.latestSnapshot.publishedAt)
+  ) {
+    return "failed";
+  }
+  if (input.latestSnapshot) {
+    if (input.latestSnapshot.validUntil.getTime() <= input.now.getTime())
+      return "stale";
+    return input.latestSnapshot.evidenceStrength === "limited"
+      ? "limited"
+      : "current";
+  }
+  return input.hasActiveTarget ? "queued" : null;
 }
 
 class ResearchService {
@@ -269,9 +403,19 @@ class ResearchService {
       .where(eq(portfoliosTable.userId, userId));
 
     const companyIds = covered.map((company) => company.id);
-    const [theses, notes, catalysts, risks, invalidations, assumptions] =
+    const [
+      theses,
+      notes,
+      catalysts,
+      risks,
+      invalidations,
+      assumptions,
+      automationTargets,
+      automationJobs,
+      automationSnapshots,
+    ] =
       companyIds.length === 0
-        ? [[], [], [], [], [], []]
+        ? [[], [], [], [], [], [], [], [], []]
         : await Promise.all([
             db
               .select()
@@ -311,6 +455,68 @@ class ResearchService {
                   companyIds,
                 ),
               ),
+            db
+              .select({
+                companyId: researchCoverageTargetsTable.companyId,
+                ticker: researchCoverageTargetsTable.ticker,
+                isActive: researchCoverageTargetsTable.isActive,
+              })
+              .from(researchCoverageTargetsTable)
+              .where(
+                and(
+                  eq(researchCoverageTargetsTable.userId, userId),
+                  inArray(researchCoverageTargetsTable.companyId, companyIds),
+                ),
+              ),
+            db
+              .select({
+                id: researchAutomationJobsTable.id,
+                companyId: researchAutomationJobsTable.companyId,
+                status: researchAutomationJobsTable.status,
+                createdAt: researchAutomationJobsTable.createdAt,
+              })
+              .from(researchAutomationJobsTable)
+              .where(
+                and(
+                  eq(researchAutomationJobsTable.userId, userId),
+                  inArray(researchAutomationJobsTable.companyId, companyIds),
+                ),
+              )
+              .orderBy(
+                desc(researchAutomationJobsTable.createdAt),
+                desc(researchAutomationJobsTable.id),
+              ),
+            db
+              .select({
+                companyId: automatedResearchSnapshotsTable.companyId,
+                evidenceStrength:
+                  automatedResearchSnapshotsTable.evidenceStrength,
+                validUntil: automatedResearchSnapshotsTable.validUntil,
+                publishedAt: automatedResearchSnapshotsTable.publishedAt,
+                version: automatedResearchSnapshotsTable.version,
+              })
+              .from(automatedResearchSnapshotsTable)
+              .innerJoin(
+                researchAutomationJobsTable,
+                and(
+                  eq(
+                    researchAutomationJobsTable.id,
+                    automatedResearchSnapshotsTable.jobId,
+                  ),
+                  eq(researchAutomationJobsTable.userId, userId),
+                  eq(researchAutomationJobsTable.status, "succeeded"),
+                ),
+              )
+              .where(
+                and(
+                  eq(automatedResearchSnapshotsTable.userId, userId),
+                  inArray(
+                    automatedResearchSnapshotsTable.companyId,
+                    companyIds,
+                  ),
+                ),
+              )
+              .orderBy(desc(automatedResearchSnapshotsTable.version)),
           ]);
 
     const thesisByCompany = new Map(
@@ -321,17 +527,38 @@ class ResearchService {
     const riskCounts = countByCompany(risks);
     const invalidationCounts = countByCompany(invalidations);
     const assumptionCounts = countByCompany(assumptions);
-
-    const holdingByTicker = new Map<string, (typeof holdings)[number]>();
-    for (const holding of holdings) {
-      const existing = holdingByTicker.get(holding.ticker);
-      if (!existing || holding.marketValue > existing.marketValue) {
-        holdingByTicker.set(holding.ticker, holding);
+    const automationCompanyIds = new Set(
+      automationTargets.map((target) => target.companyId),
+    );
+    const activeAutomationCompanyIds = new Set(
+      automationTargets
+        .filter((target) => target.isActive)
+        .map((target) => target.companyId),
+    );
+    const latestJobByCompany = new Map<
+      number,
+      (typeof automationJobs)[number]
+    >();
+    for (const job of automationJobs) {
+      if (!latestJobByCompany.has(job.companyId)) {
+        latestJobByCompany.set(job.companyId, job);
+      }
+    }
+    const latestSnapshotByCompany = new Map<
+      number,
+      (typeof automationSnapshots)[number]
+    >();
+    for (const snapshot of automationSnapshots) {
+      if (!latestSnapshotByCompany.has(snapshot.companyId)) {
+        latestSnapshotByCompany.set(snapshot.companyId, snapshot);
       }
     }
 
+    const { holdingByCompanyId, coveredHoldingTickers, holdingByTicker } =
+      buildResearchHoldingCoverageMap(covered, automationTargets, holdings);
+
     const rows: ResearchCompanyListRow[] = covered.map((company) => {
-      const holding = holdingByTicker.get(company.ticker) ?? null;
+      const holding = holdingByCompanyId.get(company.id) ?? null;
       const thesis = thesisByCompany.get(company.id) ?? null;
       const completeness = calculateResearchCompleteness({
         company,
@@ -342,34 +569,48 @@ class ResearchService {
         invalidationCount: invalidationCounts.get(company.id) ?? 0,
         valuationAssumptionCount: assumptionCounts.get(company.id) ?? 0,
       });
-      return {
-        id: company.id,
-        ticker: company.ticker,
-        name: company.name,
-        exchange: company.exchange,
-        sector: company.sector ?? holding?.sector ?? "Unclassified",
-        industry: company.industry,
-        currentPrice: holding?.marketPrice ?? company.currentPrice ?? null,
-        previousClose: company.previousClose ?? holding?.previousClose ?? null,
-        marketCap: company.marketCap,
-        pe: company.pe,
-        conviction: thesis?.conviction ?? "watch",
-        thesisStatus: thesis?.status ?? "draft",
-        completenessScore: completeness.score,
-        completenessBand: completeness.band,
-        lastUpdated: company.updatedAt,
-        isHolding: holding !== null,
-        isCovered: true,
-        quantity: holding?.quantity ?? 0,
-        marketValue: holding?.marketValue ?? 0,
-        allocationPct: holding?.allocationPct ?? 0,
-        isArchived: company.isArchived,
-      };
+      return mergeAutomatedResearchListFields(
+        {
+          id: company.id,
+          ticker: company.ticker,
+          name: company.name,
+          exchange: company.exchange,
+          sector: company.sector ?? holding?.sector ?? "Unclassified",
+          industry: company.industry,
+          currentPrice: holding?.marketPrice ?? company.currentPrice ?? null,
+          previousClose: company.previousClose ?? holding?.previousClose ?? null,
+          marketCap: company.marketCap,
+          pe: company.pe,
+          conviction: thesis?.conviction ?? "watch",
+          thesisStatus: thesis?.status ?? "draft",
+          completenessScore: completeness.score,
+          completenessBand: completeness.band,
+          lastUpdated: company.updatedAt,
+          isHolding: holding !== null,
+          isCovered: true,
+          quantity: holding?.quantity ?? 0,
+          marketValue: holding?.marketValue ?? 0,
+          allocationPct: holding?.allocationPct ?? 0,
+          isArchived: company.isArchived,
+        },
+        {
+          holding,
+          identityStatus: company.identityStatus,
+          automationState: deriveResearchAutomationState({
+            identityStatus: company.identityStatus,
+            automationEnabled: company.automationEnabled,
+            hasAnyTarget: automationCompanyIds.has(company.id),
+            hasActiveTarget: activeAutomationCompanyIds.has(company.id),
+            latestJob: latestJobByCompany.get(company.id) ?? null,
+            latestSnapshot: latestSnapshotByCompany.get(company.id) ?? null,
+            now: new Date(),
+          }),
+        },
+      );
     });
 
     for (const holding of holdingByTicker.values()) {
-      if (covered.some((company) => company.ticker === holding.ticker))
-        continue;
+      if (coveredHoldingTickers.has(normalizeTicker(holding.ticker))) continue;
       rows.push({
         id: null,
         ticker: holding.ticker,
@@ -392,6 +633,8 @@ class ResearchService {
         marketValue: holding.marketValue,
         allocationPct: holding.allocationPct,
         isArchived: false,
+        identityStatus: null,
+        automationState: null,
       });
     }
 
@@ -684,6 +927,163 @@ class ResearchService {
       valuationAssumptions: assumptions,
       completeness,
     };
+  }
+
+  async getAutomatedSignals(
+    userId: string,
+    tickerValues: string[],
+  ): Promise<Map<string, AutomatedResearchSignal>> {
+    const tickers = [...new Set(tickerValues.map(normalizeTicker))];
+    if (tickers.length === 0)
+      return new Map<string, AutomatedResearchSignal>();
+    const aliasTargets = await db
+      .select({
+        companyId: researchCoverageTargetsTable.companyId,
+        ticker: researchCoverageTargetsTable.ticker,
+      })
+      .from(researchCoverageTargetsTable)
+      .where(
+        and(
+          eq(researchCoverageTargetsTable.userId, userId),
+          eq(researchCoverageTargetsTable.isActive, true),
+          inArray(researchCoverageTargetsTable.ticker, tickers),
+        ),
+      );
+    const aliasCompanyIds = [
+      ...new Set(aliasTargets.map((target) => target.companyId)),
+    ];
+    const companies = await db
+      .select()
+      .from(researchCompaniesTable)
+      .where(
+        and(
+          eq(researchCompaniesTable.userId, userId),
+          aliasCompanyIds.length
+            ? or(
+                inArray(researchCompaniesTable.ticker, tickers),
+                inArray(researchCompaniesTable.id, aliasCompanyIds),
+              )
+            : inArray(researchCompaniesTable.ticker, tickers),
+        ),
+      );
+    if (companies.length === 0)
+      return new Map<string, AutomatedResearchSignal>();
+    const companyIds = companies.map((company) => company.id);
+    const [theses, snapshots, jobs] = await Promise.all([
+      db
+        .select()
+        .from(investmentThesesTable)
+        .where(inArray(investmentThesesTable.companyId, companyIds)),
+      db
+        .select()
+        .from(automatedResearchSnapshotsTable)
+        .innerJoin(
+          researchAutomationJobsTable,
+          and(
+            eq(
+              researchAutomationJobsTable.id,
+              automatedResearchSnapshotsTable.jobId,
+            ),
+            eq(researchAutomationJobsTable.userId, userId),
+            eq(researchAutomationJobsTable.status, "succeeded"),
+          ),
+        )
+        .where(
+          and(
+            eq(automatedResearchSnapshotsTable.userId, userId),
+            inArray(automatedResearchSnapshotsTable.companyId, companyIds),
+          ),
+        )
+        .orderBy(desc(automatedResearchSnapshotsTable.version)),
+      db
+        .select()
+        .from(researchAutomationJobsTable)
+        .where(
+          and(
+            eq(researchAutomationJobsTable.userId, userId),
+            inArray(researchAutomationJobsTable.companyId, companyIds),
+          ),
+        )
+        .orderBy(
+          desc(researchAutomationJobsTable.createdAt),
+          desc(researchAutomationJobsTable.id),
+        ),
+    ]);
+    const thesisByCompany = new Map(
+      theses.map((thesis) => [thesis.companyId, thesis]),
+    );
+    const latestSnapshotByCompany = new Map<
+      number,
+      (typeof snapshots)[number]["automated_research_snapshots"]
+    >();
+    for (const row of snapshots) {
+      if (!latestSnapshotByCompany.has(row.automated_research_snapshots.companyId)) {
+        latestSnapshotByCompany.set(
+          row.automated_research_snapshots.companyId,
+          row.automated_research_snapshots,
+        );
+      }
+    }
+    const latestJobByCompany = new Map<number, (typeof jobs)[number]>();
+    for (const job of jobs) {
+      if (!latestJobByCompany.has(job.companyId))
+        latestJobByCompany.set(job.companyId, job);
+    }
+    const snapshotIds = [...latestSnapshotByCompany.values()].map(
+      (snapshot) => snapshot.id,
+    );
+    const sourceRows = snapshotIds.length
+      ? await db
+          .select()
+          .from(automatedResearchSourcesTable)
+          .where(
+            and(
+              eq(automatedResearchSourcesTable.userId, userId),
+              inArray(automatedResearchSourcesTable.snapshotId, snapshotIds),
+            ),
+          )
+      : [];
+    const sourcesBySnapshot = new Map<number, typeof sourceRows>();
+    for (const source of sourceRows) {
+      const rows = sourcesBySnapshot.get(source.snapshotId) ?? [];
+      rows.push(source);
+      sourcesBySnapshot.set(source.snapshotId, rows);
+    }
+    const now = new Date();
+    return new Map(
+      companies.flatMap((company) => {
+        const snapshot = latestSnapshotByCompany.get(company.id) ?? null;
+        const thesis = thesisByCompany.get(company.id) ?? null;
+        const requestedTickers = new Set(
+          aliasTargets
+            .filter((target) => target.companyId === company.id)
+            .map((target) => target.ticker),
+        );
+        if (tickers.includes(company.ticker)) requestedTickers.add(company.ticker);
+        return [...requestedTickers].map((ticker) => [
+          ticker,
+          buildAutomatedResearchSignal({
+            ticker,
+            companyId: company.id,
+            manualThesis: thesis
+              ? { status: thesis.status, targetPrice: thesis.targetPrice }
+              : null,
+            snapshot,
+            latestJob: latestJobByCompany.get(company.id) ?? null,
+            sources: (snapshot
+              ? (sourcesBySnapshot.get(snapshot.id) ?? [])
+              : []
+            ).map((source) => ({
+              citationKey: source.citationKey,
+              title: source.title,
+              url: source.canonicalUrl,
+              authority: source.authority,
+            })),
+            now,
+          }),
+        ] as const);
+      }),
+    );
   }
 
   async getThesisSignals(

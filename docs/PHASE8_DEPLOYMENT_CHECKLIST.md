@@ -12,7 +12,10 @@
 ```bash
 bash apply-v0.8.sh "$REPOSITORY_ROOT"
 pnpm install --frozen-lockfile
-pnpm --filter @workspace/db push
+pnpm --filter @workspace/db migrate
+pnpm --filter @workspace/db migrate
+pnpm test:db
+pnpm test:research
 pnpm run typecheck
 pnpm run build
 ```
@@ -33,8 +36,10 @@ Stop if the database tool proposes deleting existing tables, columns or user dat
 - Sign in and open `/system-health`.
 - Confirm the database status is reachable.
 - Confirm the portfolio is user-specific and contains no sample holdings.
-- Import or enter at least one transaction and refresh prices.
-- Create or link research for a holding.
+- Add a holding manually or import a holdings CSV, then refresh prices.
+- Confirm every active holding appears in Research with an honest automation status.
+- Confirm facts link to evidence and every conclusion is labelled `AI judgement`.
+- Confirm manual research remains editable and unchanged.
 - Generate a Morning Brief.
 - Run a Guardian check and confirm no brokerage order is placed.
 - Record a journal entry and schedule a review.
@@ -42,7 +47,7 @@ Stop if the database tool proposes deleting existing tables, columns or user dat
 - Refresh the configured live-data provider and inspect freshness labels.
 - Test at mobile width and desktop width.
 - Disconnect the network temporarily and confirm the offline banner appears.
-- Run `node scripts/phase8-smoke.mjs`.
+- Run the authenticated preview smoke documented in `docs/AUTOMATED_RESEARCH_DEPLOYMENT.md`.
 
 ## Go-live criteria
 
@@ -53,3 +58,10 @@ Stop if the database tool proposes deleting existing tables, columns or user dat
 - `/api/integration/health` returns 401 signed out and user-specific data signed in.
 - No provider secret appears in browser network responses.
 - Critical alerts and system blockers are reviewed.
+- The managed database recovery point is verified before migration.
+- The migration is idempotent on a disposable database.
+- The Scheduled Deployment passes Run Now and does not create duplicate jobs.
+
+## Automated research scheduler
+
+Follow `docs/AUTOMATED_RESEARCH_DEPLOYMENT.md`. Use a separate Replit Scheduled Deployment every 15 minutes in `Asia/Calcutta`; do not add an in-process timer to the autoscale web server.
