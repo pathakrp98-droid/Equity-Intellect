@@ -1,6 +1,6 @@
 # AlphaDesk free-hosting migration design
 
-Date: 2026-08-28. Status: architecture discussed; written specification awaiting user review.
+Date: 2026-08-28. Status: approved by the user on 2026-08-29.
 
 ## Outcome and boundaries
 
