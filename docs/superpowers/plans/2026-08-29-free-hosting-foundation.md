@@ -35,7 +35,7 @@
 - Consumes: the root `pnpm run build` command and pinned native package versions already in the lockfile.
 - Produces: a clean install capable of selecting the current operating system's esbuild, Rollup, Lightning CSS, and Tailwind Oxide binary.
 
-- [ ] **Step 1: Reconfirm the failing build**
+- [x] **Step 1: Reconfirm the failing build**
 
 Run with paid AI disabled:
 
@@ -47,17 +47,17 @@ pnpm run build
 
 Expected: FAIL on Windows because `@esbuild/win32-x64` is excluded.
 
-- [ ] **Step 2: Correct only platform selection**
+- [x] **Step 2: Correct only platform selection**
 
 Remove the `overrides` entries that force `-` for every esbuild, Rollup, Lightning CSS, and `@tailwindcss/oxide` platform binary. Configure `supportedArchitectures` for the current workstation plus Linux x64/glibc so one lockfile supports local verification and Render. Replace the legacy build-script list with the pnpm 11 `allowBuilds` map containing only the same four trusted packages. Explicitly disable pnpm's environment-sensitive global virtual store so local and CI script checks use the same generated dependency layout. Retain the supply-chain age policy, version pins, the tsx replacement, and unrelated Expo/ngrok exclusions. Run `pnpm install --lockfile-only`, inspect the lockfile diff, then install the unchanged lockfile so no unrelated dependency version changes enter the branch.
 
 The first Windows install also proved the current `sh -c` preinstall hook is not portable. Before replacing it, add `scripts/enforce-pnpm.test.mjs`: execute the real script in a disposable directory and prove a non-pnpm user agent exits nonzero while a pnpm user agent exits zero and removes only `package-lock.json` and `yarn.lock`. Run the test red because the script does not exist. Implement the hook with `node:fs/promises.rm`, switch `package.json` preinstall to `node ./scripts/enforce-pnpm.mjs`, then run the test green.
 
-- [ ] **Step 3: Verify the build regression is green**
+- [x] **Step 3: Verify the build regression is green**
 
 Run `pnpm run build`. Expected: exit 0 with Vite output for the frontend and esbuild output for the API.
 
-- [ ] **Step 4: Commit the focused build fix**
+- [x] **Step 4: Commit the focused build fix**
 
 ```powershell
 git add package.json pnpm-workspace.yaml pnpm-lock.yaml scripts/enforce-pnpm.mjs scripts/enforce-pnpm.test.mjs docs/superpowers/plans/2026-08-29-free-hosting-foundation.md
@@ -81,15 +81,15 @@ git commit -m "fix: restore cross-platform production builds"
 - Produces: `aiRequestsEnabled(environment?: NodeJS.ProcessEnv): boolean`, `openAiAvailable(environment?: NodeJS.ProcessEnv): boolean`, and `assertOpenAiAvailable(environment?: NodeJS.ProcessEnv): void`.
 - Consumers: both OpenAI providers, the research worker, routes, readiness reporting, and deployment configuration.
 
-- [ ] **Step 1: Write the policy tests**
+- [x] **Step 1: Write the policy tests**
 
 Add literal table cases proving default, `false`, `TRUE`, `1`, and whitespace are disabled; only exact `true` is enabled. Prove `openAiAvailable` additionally requires a nonblank key and `assertOpenAiAvailable` throws `Paid AI requests are disabled.` before considering the key.
 
-- [ ] **Step 2: Run the policy test red**
+- [x] **Step 2: Run the policy test red**
 
 Run `pnpm exec tsx --test artifacts/api-server/src/lib/aiPolicy.test.ts`. Expected: FAIL because `aiPolicy.ts` does not exist.
 
-- [ ] **Step 3: Implement the minimal policy**
+- [x] **Step 3: Implement the minimal policy**
 
 ```ts
 export function aiRequestsEnabled(environment = process.env): boolean {
@@ -108,23 +108,23 @@ export function assertOpenAiAvailable(environment = process.env): void {
 
 Run the focused test. Expected: all policy cases pass.
 
-- [ ] **Step 4: Write provider network-denial tests**
+- [x] **Step 4: Write provider network-denial tests**
 
 In each provider test, set a dummy key, set `AI_REQUESTS_ENABLED=false`, replace `globalThis.fetch` with a function that throws if called, and invoke the real provider. Assert the provider reports unconfigured and rejects with its public unconfigured error without invoking fetch.
 
-- [ ] **Step 5: Run provider tests red**
+- [x] **Step 5: Run provider tests red**
 
 Run both provider test files. Expected: FAIL because the providers currently treat the key alone as configured and reach fetch.
 
-- [ ] **Step 6: Guard availability and requests**
+- [x] **Step 6: Guard availability and requests**
 
 Use `openAiAvailable()` in both `isConfigured()` methods and call the policy immediately before resolving the API key in every outbound request path. Translate the shared disabled error to `ResearchProviderError("provider_unconfigured")` in the research provider. Add `AI_REQUESTS_ENABLED` to test environment cleanup and set it to `true` in existing successful provider fixtures.
 
-- [ ] **Step 7: Guard the worker before database activity**
+- [x] **Step 7: Guard the worker before database activity**
 
 Write a test proving `runResearchBatch` with AI disabled returns a skipped, zero-count summary without invoking `acquireGlobalLease`. Make existing worker tests set the flag to `true`. Implement the early return in `runResearchBatch`; change `research-worker.ts` to check the policy before dynamically importing the database-backed runtime, so a disabled worker exits successfully without touching PostgreSQL.
 
-- [ ] **Step 8: Verify and commit cost controls**
+- [x] **Step 8: Verify and commit cost controls**
 
 Run the policy, Copilot provider, research provider, and worker tests. Then run `pnpm run typecheck`. Commit only those files with `git commit -m "feat: block paid AI requests by default"`.
 

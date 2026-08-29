@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { assertOpenAiAvailable, openAiAvailable } from "../../lib/aiPolicy";
 import {
   sanitizeGeneratedAnswer,
   type CopilotMode,
@@ -191,12 +192,12 @@ export class OpenAIResponsesProvider {
   readonly model = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 
   isConfigured(): boolean {
-    return Boolean(process.env.OPENAI_API_KEY?.trim());
+    return openAiAvailable();
   }
 
   async generate(input: GenerateInput): Promise<GenerateResult> {
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+    assertOpenAiAvailable();
+    const apiKey = process.env.OPENAI_API_KEY!.trim();
 
     const timeoutMs = Number(process.env.COPILOT_TIMEOUT_MS ?? 45_000);
     const maxOutputTokens = Number(

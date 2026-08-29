@@ -16,6 +16,7 @@ import {
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ENVIRONMENT_KEYS = [
+  "AI_REQUESTS_ENABLED",
   "OPENAI_API_KEY",
   "OPENAI_MODEL",
   "RESEARCH_MODEL",
@@ -31,6 +32,7 @@ const ORIGINAL_ENVIRONMENT = new Map(
 );
 
 beforeEach(() => {
+  process.env.AI_REQUESTS_ENABLED = "true";
   process.env.OPENAI_API_KEY = "test-api-key-never-sent-live";
   delete process.env.RESEARCH_MODEL;
   delete process.env.OPENAI_MODEL;
@@ -1094,6 +1096,23 @@ test("OpenAI research: discovery and generation honor separate abort deadlines",
       "provider_timeout",
     );
   });
+});
+
+test("OpenAI research: disabled AI rejects before any outbound request", async () => {
+  process.env.AI_REQUESTS_ENABLED = "false";
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error("fetch must not be reached while paid AI is disabled");
+  }) as typeof fetch;
+
+  const provider = new OpenAIResearchProvider();
+  assert.equal(provider.isConfigured(), false);
+  await assertProviderError(
+    () => provider.discoverEvidence(discoveryInput()),
+    "provider_unconfigured",
+  );
+  assert.equal(calls, 0);
 });
 
 test("OpenAI research: configuration and model fallback never require reading a live key", async () => {

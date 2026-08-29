@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 
 import {
   ResearchWorkerFatalError,
@@ -8,6 +8,19 @@ import {
 } from "./researchWorker";
 
 const NOW = new Date("2026-08-21T00:15:00.000Z");
+const ORIGINAL_AI_REQUESTS_ENABLED = process.env.AI_REQUESTS_ENABLED;
+
+beforeEach(() => {
+  process.env.AI_REQUESTS_ENABLED = "true";
+});
+
+afterEach(() => {
+  if (ORIGINAL_AI_REQUESTS_ENABLED === undefined) {
+    delete process.env.AI_REQUESTS_ENABLED;
+  } else {
+    process.env.AI_REQUESTS_ENABLED = ORIGINAL_AI_REQUESTS_ENABLED;
+  }
+});
 
 function dependencies(
   overrides: Partial<ResearchWorkerDependencies> = {},
@@ -38,6 +51,38 @@ function dependencies(
     ...overrides,
   };
 }
+
+test("worker: disabled AI skips without touching the database lease", async () => {
+  process.env.AI_REQUESTS_ENABLED = "false";
+  let acquired = false;
+
+  const summary = await runResearchBatch(
+    { workerId: "worker-disabled", now: NOW },
+    dependencies({
+      acquireGlobalLease: async () => {
+        acquired = true;
+        return true;
+      },
+    }),
+  );
+
+  assert.equal(acquired, false);
+  assert.deepEqual(summary, {
+    status: "skipped",
+    leaseAcquired: false,
+    recoveredEvents: 0,
+    recoveredJobs: 0,
+    dailyJobsEnqueued: 0,
+    eventsProcessed: 0,
+    eventsFailed: 0,
+    jobsClaimed: 0,
+    succeeded: 0,
+    retried: 0,
+    failed: 0,
+    skipped: 0,
+    remaining: 0,
+  });
+});
 
 test("worker: refuses a concurrent global batch", async () => {
   let claimed = false;
