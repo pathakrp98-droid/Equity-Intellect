@@ -149,23 +149,23 @@ Run the policy, Copilot provider, research provider, and worker tests. Then run 
 - Produces: `useAppCapabilities()` and `aiAvailabilityCopy(capabilities)` for React consumers.
 - Research refresh POST returns 503 with `AI generation is disabled on this deployment.` while disabled; read-only history remains available.
 
-- [ ] **Step 1: Write route and view-model tests**
+- [x] **Step 1: Write route and view-model tests**
 
 Test the real capability handler with literal environments for disabled, enabled-without-key, and available. Test that authenticated research refresh returns 503 without invoking the service while reads still return saved data. Test the pure frontend view model returns “AI generation is disabled on this deployment.” and disables refresh whenever capabilities are absent or unavailable.
 
-- [ ] **Step 2: Run the new tests red**
+- [x] **Step 2: Run the new tests red**
 
 Run the capability route, research route, and view-model test files. Expected: FAIL because the route/view model do not exist and refresh ignores the policy.
 
-- [ ] **Step 3: Implement server behavior**
+- [x] **Step 3: Implement server behavior**
 
 Create a router factory that accepts an environment for tests, mount it at `/api/capabilities`, and add an injectable `isAiEnabled` function to `createResearchAutomationRouter`. Gate only the mutation; preserve authenticated coverage, company, history, and job reads. Replace key-only integration/readiness booleans and outdated “add key” wording with the shared policy and no-spend wording.
 
-- [ ] **Step 4: Implement the React capability state**
+- [x] **Step 4: Implement the React capability state**
 
 Fetch capabilities with TanStack Query under `['app-capabilities']`, cache for five minutes, and default unavailable on errors. Add a visible informational card on Research. Keep saved snapshots and evidence readable, stop presenting queued work as active while AI is disabled, disable “Refresh research,” and leave identity correction plus “Your research” editing available.
 
-- [ ] **Step 5: Verify and commit honest UI state**
+- [x] **Step 5: Verify and commit honest UI state**
 
 Run the focused server/frontend tests, research tests, and typecheck. Review the modified TSX against React hook, accessibility, and loading-state guidance. Commit with `git commit -m "feat: surface disabled AI state"`.
 

@@ -155,7 +155,10 @@ function matchesSearch(row: AutomatedResearchCoverage, search: string) {
   );
 }
 
-export function useAutomatedResearchCoverage(search = "") {
+export function useAutomatedResearchCoverage(
+  search = "",
+  automationAvailable = true,
+) {
   return useQuery({
     queryKey: [...automationKey, "coverage"],
     queryFn: async () => {
@@ -166,6 +169,7 @@ export function useAutomatedResearchCoverage(search = "") {
     },
     select: (coverage) => coverage.filter((row) => matchesSearch(row, search)),
     refetchInterval: (query) =>
+      automationAvailable &&
       query.state.data?.some(
         (row) =>
           row.isHolding &&

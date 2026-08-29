@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCw,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -108,6 +109,26 @@ function EmptyAutomationState({
         <p className="text-xs text-muted-foreground">
           You can leave this page. Research runs separately and your portfolio
           remains available.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DisabledAutomationState() {
+  return (
+    <Card className="border-dashed border-amber-500/30 bg-amber-500/5">
+      <CardContent className="mx-auto max-w-xl space-y-4 p-8 text-center sm:p-12">
+        <ShieldAlert className="mx-auto h-10 w-10 text-amber-500" />
+        <div>
+          <h2 className="text-xl font-semibold">AI updates are off</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            AI generation is disabled on this deployment.
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Saved research and evidence remain readable. Your portfolio and
+          editable research are unaffected.
         </p>
       </CardContent>
     </Card>
@@ -249,9 +270,11 @@ function SnapshotView({ snapshot }: { snapshot: AutomatedResearchSnapshot }) {
 
 export function AutomatedResearchPanel({
   coverage,
+  automationAvailable,
   onIdentityCorrected,
 }: {
   coverage: AutomatedResearchCoverage;
+  automationAvailable: boolean;
   onIdentityCorrected?: (ticker: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -260,10 +283,14 @@ export function AutomatedResearchPanel({
     hasAutomatedCompany ? coverage.ticker : null,
   );
   const refresh = useRequestAutomatedResearchRefresh(coverage.ticker);
-  const activeJob = current.data?.recentJobs.find((job) =>
-    ["queued", "running"].includes(job.status),
-  );
-  const jobId = refresh.data?.jobId ?? activeJob?.id ?? null;
+  const activeJob = automationAvailable
+    ? current.data?.recentJobs.find((job) =>
+        ["queued", "running"].includes(job.status),
+      )
+    : undefined;
+  const jobId = automationAvailable
+    ? (refresh.data?.jobId ?? activeJob?.id ?? null)
+    : null;
   const run = useResearchAutomationRun(jobId);
 
   useEffect(() => {
@@ -305,7 +332,11 @@ export function AutomatedResearchPanel({
 
   if (!hasAutomatedCompany || current.isLoading) {
     return !hasAutomatedCompany ? (
-      <EmptyAutomationState state="queued" />
+      automationAvailable ? (
+        <EmptyAutomationState state="queued" />
+      ) : (
+        <DisabledAutomationState />
+      )
     ) : (
       <Skeleton className="min-h-72 w-full" />
     );
@@ -322,6 +353,9 @@ export function AutomatedResearchPanel({
   }
 
   const snapshot = current.data?.latestSnapshot ?? null;
+  if (!snapshot && !automationAvailable) {
+    return <DisabledAutomationState />;
+  }
   const state = displayAutomationState({
     coverageState: baseState,
     runStatus: run.data?.status ?? null,
@@ -368,7 +402,12 @@ export function AutomatedResearchPanel({
             <Button
               className="w-full sm:w-auto"
               variant="outline"
-              disabled={refresh.isPending || state === "running"}
+              disabled={
+                !automationAvailable || refresh.isPending || state === "running"
+              }
+              aria-describedby={
+                automationAvailable ? undefined : "ai-refresh-disabled"
+              }
               onClick={() => refresh.mutate()}
             >
               {refresh.isPending || state === "running" ? (
@@ -379,12 +418,21 @@ export function AutomatedResearchPanel({
               Refresh research
             </Button>
           </div>
+          {!automationAvailable ? (
+            <p
+              id="ai-refresh-disabled"
+              className="mt-3 text-sm text-muted-foreground"
+            >
+              AI generation is disabled on this deployment. This saved
+              snapshot remains available.
+            </p>
+          ) : null}
           {refresh.isError ? (
             <p className="mt-3 text-sm text-destructive">
               {refresh.error.message}
             </p>
           ) : null}
-          {refresh.isSuccess ? (
+          {automationAvailable && refresh.isSuccess ? (
             <p className="mt-3 text-sm text-primary">
               Update queued. You can leave this page while AlphaDesk works.
             </p>

@@ -208,7 +208,7 @@ export function evaluateIntegrationReadiness(
   }
   if (!facts.research.providerConfigured) {
     recommendations.push(
-      "Connect the AI research provider to refresh evidence; saved research remains available.",
+      "AI generation is disabled or unavailable; saved research remains available.",
     );
   }
   if (facts.research.overdueReviews > 0) {
@@ -245,7 +245,7 @@ export function evaluateIntegrationReadiness(
     : "optional";
   if (!facts.copilot.aiProviderConfigured) {
     recommendations.push(
-      "Add OPENAI_API_KEY to enable the live Copilot; deterministic grounded fallback remains available.",
+      "Live paid AI is disabled; the free deterministic grounded fallback remains available.",
     );
   }
   modules.push(

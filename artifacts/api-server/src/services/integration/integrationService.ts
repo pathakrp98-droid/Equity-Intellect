@@ -23,6 +23,7 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm";
 
+import { openAiAvailable } from "../../lib/aiPolicy";
 import { listLiveDataProviders } from "../liveData/providerRegistry";
 import {
   evaluateIntegrationReadiness,
@@ -334,12 +335,12 @@ class IntegrationService {
               )
             : null,
         ),
-        providerConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        providerConfigured: openAiAvailable(),
       },
       copilot: {
         conversations: conversations.length,
         memories: memories.length,
-        aiProviderConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        aiProviderConfigured: openAiAvailable(),
       },
       intelligence: {
         briefs: briefs.length,
@@ -380,7 +381,7 @@ class IntegrationService {
         corsAllowListConfigured: Boolean(
           process.env.CORS_ALLOWED_ORIGINS?.trim(),
         ),
-        openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        openAiConfigured: openAiAvailable(),
         configuredLiveDataProviders: configuredProviders,
         normalizedHttpProviderConfigured:
           configuredProviders.includes("normalized-http"),

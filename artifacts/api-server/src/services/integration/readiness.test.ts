@@ -120,6 +120,22 @@ test("critical alerts are surfaced as blockers", () => {
   );
 });
 
+test("disabled paid AI recommends free and saved behavior without asking for a key", () => {
+  const result = evaluateIntegrationReadiness(
+    facts({
+      research: {
+        ...facts().research,
+        providerConfigured: false,
+      },
+      copilot: { conversations: 0, memories: 0, aiProviderConfigured: false },
+    }),
+  );
+  const recommendations = result.recommendations.join(" ");
+  assert.match(recommendations, /saved research remains available/i);
+  assert.match(recommendations, /free deterministic grounded fallback/i);
+  assert.doesNotMatch(recommendations, /OPENAI_API_KEY|add .*key/i);
+});
+
 test("limited or stale automation is attention without pretending coverage is missing", () => {
   const result = evaluateIntegrationReadiness(
     facts({

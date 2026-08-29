@@ -19,6 +19,7 @@ export function ResearchCoverageList({
   coverage,
   isLoading,
   search,
+  automationAvailable,
   onSearch,
   selectedTicker,
   onSelect,
@@ -26,6 +27,7 @@ export function ResearchCoverageList({
   coverage: AutomatedResearchCoverage[] | undefined;
   isLoading: boolean;
   search: string;
+  automationAvailable: boolean;
   onSearch: (value: string) => void;
   selectedTicker: string | null;
   onSelect: (ticker: string) => void;
@@ -54,6 +56,9 @@ export function ResearchCoverageList({
             ))
           : rows.map((row) => {
               const state = effectiveState(row);
+              const hidesActiveState =
+                !automationAvailable &&
+                (state === "queued" || state === "running");
               return (
                 <button
                   type="button"
@@ -88,7 +93,11 @@ export function ResearchCoverageList({
                     ) : null}
                   </div>
                   <div className="mt-3">
-                    {state ? (
+                    {hidesActiveState ? (
+                      <span className="inline-flex rounded-full border bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                        AI updates off
+                      </span>
+                    ) : state ? (
                       <ResearchStatusBadge state={state} />
                     ) : (
                       <span className="inline-flex rounded-full border bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-muted-foreground">

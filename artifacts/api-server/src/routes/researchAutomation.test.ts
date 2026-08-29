@@ -29,6 +29,7 @@ function service(
 async function withServer<T>(
   apiService: ResearchAutomationApiService,
   operation: (baseUrl: string) => Promise<T>,
+  isAiEnabled: () => boolean = () => true,
 ): Promise<T> {
   const app = express();
   app.use(express.json());
@@ -41,7 +42,7 @@ async function withServer<T>(
   });
   app.use(
     "/api/research/automation",
-    createResearchAutomationRouter(apiService),
+    createResearchAutomationRouter(apiService, isAiEnabled),
   );
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => {
@@ -59,6 +60,44 @@ async function withServer<T>(
     );
   }
 }
+
+test("automation route: disabled AI blocks refresh but preserves saved reads", async () => {
+  let reads = 0;
+  let refreshes = 0;
+  await withServer(
+    service({
+      getCompany: async (userId, ticker) => {
+        reads += 1;
+        return { ticker, userId, status: "current" };
+      },
+      requestRefresh: async () => {
+        refreshes += 1;
+        return { jobId: 9, created: true };
+      },
+    }),
+    async (baseUrl) => {
+      const headers = { "x-test-user": "user-a" };
+      const company = await fetch(
+        `${baseUrl}/api/research/automation/companies/RELIANCE`,
+        { headers },
+      );
+      assert.equal(company.status, 200);
+
+      const refresh = await fetch(
+        `${baseUrl}/api/research/automation/companies/RELIANCE/refresh`,
+        { method: "POST", headers },
+      );
+      assert.equal(refresh.status, 503);
+      assert.deepEqual(await refresh.json(), {
+        error: "AI generation is disabled on this deployment.",
+      });
+    },
+    () => false,
+  );
+
+  assert.equal(reads, 1);
+  assert.equal(refreshes, 0);
+});
 
 test("automation route: every read endpoint requires authentication", async () => {
   await withServer(service(), async (baseUrl) => {
