@@ -183,7 +183,7 @@ git commit -m "feat: validate auth provider configuration"
 - Produces the compiled operator command
   `artifacts/api-server/dist/bind-auth-identity.mjs`.
 
-- [ ] **Step 1: Write schema and migration tests**
+- [x] **Step 1: Write schema and migration tests**
 
 Use `getTableConfig` plus literal migration inspection to assert:
 
@@ -208,7 +208,7 @@ The schema uses `varchar(512)` for issuer, `varchar(255)` for subject, a
 non-null `user_id`, `created_at timestamptz default now()`, nonblank checks,
 and no email column.
 
-- [ ] **Step 2: Run the schema test red**
+- [x] **Step 2: Run the schema test red**
 
 Run:
 
@@ -218,7 +218,7 @@ node --import tsx --test lib/db/src/schema/auth.test.ts
 
 Expected: FAIL because the table and migration are absent.
 
-- [ ] **Step 3: Add the additive table and migration**
+- [x] **Step 3: Add the additive table and migration**
 
 Use one composite primary key, one user index, and this ownership direction:
 
@@ -240,7 +240,7 @@ CREATE INDEX IF NOT EXISTS auth_external_identities_user_id_idx
 
 Do not modify `users.id` or any dependent table.
 
-- [ ] **Step 4: Write repository binding tests**
+- [x] **Step 4: Write repository binding tests**
 
 Use a fake transactional adapter to prove all four outcomes: missing internal
 user rejects, unbound identity inserts, identical binding is idempotent, and a
@@ -248,7 +248,7 @@ binding to another user rejects. Assert that all repository predicates contain
 both exact `issuer` and case-sensitive `subject`; no test or implementation may
 query users by email.
 
-- [ ] **Step 5: Run the repository test red**
+- [x] **Step 5: Run the repository test red**
 
 Run:
 
@@ -258,7 +258,7 @@ node --import tsx --test artifacts/api-server/src/services/auth/externalIdentity
 
 Expected: FAIL because the repository is absent.
 
-- [ ] **Step 6: Implement transactional lookup and binding**
+- [x] **Step 6: Implement transactional lookup and binding**
 
 Inside one `db.transaction`, lock the selected user row, read the exact
 issuer/subject row, then insert only if absent. Return `already_bound` only
@@ -267,7 +267,7 @@ safe message `External identity is already bound to another user.`. Throw
 `Selected internal user does not exist.` before inserting when the user lock
 returns no row.
 
-- [ ] **Step 7: Write and implement strict CLI parsing**
+- [x] **Step 7: Write and implement strict CLI parsing**
 
 Test missing, duplicated, and unknown flags. The accepted invocation is exact:
 
@@ -281,7 +281,7 @@ characters, and never accept email. The command prints `created` or
 `already_bound`, sets a nonzero exit code for conflicts, and closes the pool in
 `finally`.
 
-- [ ] **Step 8: Bundle and verify the operator command**
+- [x] **Step 8: Bundle and verify the operator command**
 
 Add `bind-auth-identity` to the API esbuild entry points and add:
 
@@ -300,7 +300,7 @@ pnpm --filter @workspace/api-server run build
 Expected: all tests pass and the binding artifact exists. Do not execute the
 command against a real database during this task.
 
-- [ ] **Step 9: Commit identity persistence**
+- [x] **Step 9: Commit identity persistence**
 
 ```powershell
 git add lib/db/migrations/20260830_google_auth_identity_mapping.sql lib/db/src/schema/auth.ts lib/db/src/schema/auth.test.ts artifacts/api-server/src/services/auth artifacts/api-server/src/scripts/bindExternalIdentity.ts artifacts/api-server/src/scripts/bindExternalIdentity.test.ts artifacts/api-server/build.mjs artifacts/api-server/package.json

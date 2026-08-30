@@ -1,5 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { index, jsonb, pgTable, timestamp, varchar } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  jsonb,
+  pgTable,
+  primaryKey,
+  timestamp,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const sessionsTable = pgTable(
@@ -30,5 +38,36 @@ export const usersTable = pgTable('users', {
     .$onUpdate(() => new Date()),
 });
 
+export const authExternalIdentitiesTable = pgTable(
+  'auth_external_identities',
+  {
+    issuer: varchar('issuer', { length: 512 }).notNull(),
+    subject: varchar('subject', { length: 255 }).notNull(),
+    userId: varchar('user_id')
+      .notNull()
+      .references(() => usersTable.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'auth_external_identities_pk',
+      columns: [table.issuer, table.subject],
+    }),
+    index('auth_external_identities_user_id_idx').on(table.userId),
+    check(
+      'auth_external_identities_issuer_check',
+      sql`btrim(${table.issuer}) <> ''`,
+    ),
+    check(
+      'auth_external_identities_subject_check',
+      sql`btrim(${table.subject}) <> ''`,
+    ),
+  ],
+);
+
 export type UpsertUser = typeof usersTable.$inferInsert;
 export type User = typeof usersTable.$inferSelect;
+export type AuthExternalIdentity =
+  typeof authExternalIdentitiesTable.$inferSelect;

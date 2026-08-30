@@ -18,6 +18,10 @@ async function buildAll() {
     entryPoints: {
       index: path.resolve(artifactDir, "src/index.ts"),
       "research-worker": path.resolve(artifactDir, "src/research-worker.ts"),
+      "bind-auth-identity": path.resolve(
+        artifactDir,
+        "src/scripts/bindExternalIdentity.ts",
+      ),
     },
     platform: "node",
     bundle: true,

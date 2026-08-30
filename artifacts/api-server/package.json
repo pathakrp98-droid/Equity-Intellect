@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "research:run-once": "node --enable-source-maps ./dist/research-worker.mjs",
+    "auth:bind": "node --enable-source-maps ./dist/bind-auth-identity.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
