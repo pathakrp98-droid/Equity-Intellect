@@ -7,7 +7,10 @@ import express, {
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { mountFrontend } from "./lib/frontendHosting";
 import { logger } from "./lib/logger";
 import { authMiddleware } from "./middlewares/authMiddleware";
 import {
@@ -73,6 +76,15 @@ app.use("/api", router);
 app.use("/api", (_req: Request, res: Response) => {
   res.status(404).json({ error: "API route not found" });
 });
+
+if (environment === "production") {
+  mountFrontend(app, {
+    assetsDirectory: path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "public",
+    ),
+  });
+}
 
 app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   const status =

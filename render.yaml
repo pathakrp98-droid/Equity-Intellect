@@ -1,0 +1,22 @@
+# Configuration only: do not create this service until Google auth and the
+# approved database restore are ready. This blueprint provisions no database,
+# disk, worker, cron job, or paid AI integration.
+services:
+  - type: web
+    name: alphadesk
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production
+      - key: AI_REQUESTS_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
