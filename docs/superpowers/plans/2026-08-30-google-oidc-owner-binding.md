@@ -328,7 +328,7 @@ git commit -m "feat: add explicit external identity binding"
 - `createSession(data, ttlMs)` retains opaque random IDs and caps authenticated
   lifetime at seven days; pending setup lifetime is ten minutes.
 
-- [ ] **Step 1: Write session parsing tests**
+- [x] **Step 1: Write session parsing tests**
 
 The test matrix must prove:
 
@@ -350,7 +350,7 @@ The Google session contains only `kind`, normalized `user`, and `expiresAt`.
 The pending record contains only safe display claims plus exact issuer/subject;
 it has no internal user ID and cannot satisfy authentication.
 
-- [ ] **Step 2: Run the session test red**
+- [x] **Step 2: Run the session test red**
 
 Run:
 
@@ -360,14 +360,14 @@ node --import tsx --test artifacts/api-server/src/lib/authSession.test.ts
 
 Expected: FAIL because the parser is absent.
 
-- [ ] **Step 3: Implement strict session parsing and storage**
+- [x] **Step 3: Implement strict session parsing and storage**
 
 Normalize the legacy snake-case fields into `ReplitSessionData` at read time,
 but write new Replit sessions with the discriminant. Reject unknown keys for
 Google and pending session variants. `getSession` returns null and deletes the
 row when the database expiry or the authenticated `expiresAt` has passed.
 
-- [ ] **Step 4: Write middleware behavior tests**
+- [x] **Step 4: Write middleware behavior tests**
 
 Inject session lookup, update, delete, and a refresh spy. Prove that an active
 Google session sets `req.user` with zero refresh calls; an expired Google
@@ -375,13 +375,13 @@ session clears its cookie; an active legacy/Replit session remains compatible;
 an expired Replit session refreshes only when it has a refresh token; and a
 pending Google identity never sets `req.user`.
 
-- [ ] **Step 5: Implement provider-aware middleware**
+- [x] **Step 5: Implement provider-aware middleware**
 
 Replace in-place session mutation with a returned Replit session. Branch on
 `session.kind` before calling `refreshTokenGrant`. A Google or pending session
 must never call discovery or token refresh.
 
-- [ ] **Step 6: Run middleware tests and typecheck**
+- [x] **Step 6: Run middleware tests and typecheck**
 
 ```powershell
 node --import tsx --test artifacts/api-server/src/lib/authSession.test.ts artifacts/api-server/src/middlewares/authMiddleware.test.ts
@@ -390,7 +390,7 @@ pnpm --filter @workspace/api-server run typecheck
 
 Expected: all tests PASS and typecheck exits 0.
 
-- [ ] **Step 7: Commit provider-specific sessions**
+- [x] **Step 7: Commit provider-specific sessions**
 
 ```powershell
 git add artifacts/api-server/src/lib/auth.ts artifacts/api-server/src/lib/authSession.ts artifacts/api-server/src/lib/authSession.test.ts artifacts/api-server/src/middlewares/authMiddleware.ts artifacts/api-server/src/middlewares/authMiddleware.test.ts

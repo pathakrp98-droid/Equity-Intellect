@@ -206,8 +206,14 @@ router.get('/callback', async (req: Request, res: Response) => {
 
   const dbUser = await upsertUser(claims as unknown as Record<string, unknown>);
 
-  const now = Math.floor(Date.now() / 1000);
+  const expiresIn = tokens.expiresIn();
+  const expiresAt = expiresIn
+    ? Date.now() + expiresIn * 1_000
+    : claims.exp
+      ? claims.exp * 1_000
+      : undefined;
   const sessionData: SessionData = {
+    kind: 'replit',
     user: {
       id: dbUser.id,
       email: dbUser.email,
@@ -215,9 +221,11 @@ router.get('/callback', async (req: Request, res: Response) => {
       lastName: dbUser.lastName,
       profileImageUrl: dbUser.profileImageUrl,
     },
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: tokens.expiresIn() ? now + tokens.expiresIn()! : claims.exp,
+    accessToken: tokens.access_token,
+    ...(tokens.refresh_token
+      ? { refreshToken: tokens.refresh_token }
+      : {}),
+    ...(expiresAt ? { expiresAt } : {}),
   };
 
   const sid = await createSession(sessionData);
@@ -278,8 +286,14 @@ router.post(
         claims as unknown as Record<string, unknown>,
       );
 
-      const now = Math.floor(Date.now() / 1000);
+      const expiresIn = tokens.expiresIn();
+      const expiresAt = expiresIn
+        ? Date.now() + expiresIn * 1_000
+        : claims.exp
+          ? claims.exp * 1_000
+          : undefined;
       const sessionData: SessionData = {
+        kind: 'replit',
         user: {
           id: dbUser.id,
           email: dbUser.email,
@@ -287,9 +301,11 @@ router.post(
           lastName: dbUser.lastName,
           profileImageUrl: dbUser.profileImageUrl,
         },
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expires_at: tokens.expiresIn() ? now + tokens.expiresIn()! : claims.exp,
+        accessToken: tokens.access_token,
+        ...(tokens.refresh_token
+          ? { refreshToken: tokens.refresh_token }
+          : {}),
+        ...(expiresAt ? { expiresAt } : {}),
       };
 
       const sid = await createSession(sessionData);
