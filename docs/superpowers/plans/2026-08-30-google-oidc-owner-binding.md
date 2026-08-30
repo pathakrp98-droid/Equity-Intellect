@@ -64,7 +64,7 @@ PostgreSQL, Node test runner, Zod-generated API contracts, React/Vite.
   `getOidcConfig(): Promise<openidClient.Configuration>` for route and
   middleware consumers.
 
-- [ ] **Step 1: Write the configuration tests**
+- [x] **Step 1: Write the configuration tests**
 
 Cover exact mode selection and fail-closed validation:
 
@@ -97,7 +97,7 @@ assert.equal(google.issuer, "https://accounts.google.com");
 Also reject unknown `AUTH_PROVIDER`, blank client fields, credentials embedded
 in `APP_ORIGIN`, query/fragment/path values, and non-HTTPS non-loopback origins.
 
-- [ ] **Step 2: Run the configuration test red**
+- [x] **Step 2: Run the configuration test red**
 
 Run:
 
@@ -107,7 +107,7 @@ node --import tsx --test artifacts/api-server/src/lib/authConfig.test.ts
 
 Expected: FAIL because `authConfig.ts` does not exist.
 
-- [ ] **Step 3: Implement the configuration union**
+- [x] **Step 3: Implement the configuration union**
 
 Use these public types and exact Google issuer:
 
@@ -138,7 +138,7 @@ Google must not read `ISSUER_URL` or `REPL_ID`. Build Google discovery with
 containing `client_secret`; keep the existing public-client discovery behavior
 for Replit.
 
-- [ ] **Step 4: Run the focused tests and typecheck**
+- [x] **Step 4: Run the focused tests and typecheck**
 
 Run:
 
@@ -149,7 +149,7 @@ pnpm --filter @workspace/api-server run typecheck
 
 Expected: all configuration tests PASS and typecheck exits 0.
 
-- [ ] **Step 5: Commit provider configuration**
+- [x] **Step 5: Commit provider configuration**
 
 ```powershell
 git add artifacts/api-server/src/lib/authConfig.ts artifacts/api-server/src/lib/authConfig.test.ts artifacts/api-server/src/lib/auth.ts
