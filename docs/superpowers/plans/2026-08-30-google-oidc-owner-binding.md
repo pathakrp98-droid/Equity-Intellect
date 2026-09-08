@@ -416,7 +416,7 @@ git commit -m "feat: isolate provider auth sessions"
 - Preserves `/login`, `/callback`, `/logout`, `/auth/user`, and both mobile
   endpoint paths.
 
-- [ ] **Step 1: Write HTML escaping and safe-return tests**
+- [x] **Step 1: Write HTML escaping and safe-return tests**
 
 `renderIdentitySetupPage` must HTML-escape display name, email, issuer, and
 subject. `renderAuthErrorPage` accepts a closed reason union and never renders
@@ -424,7 +424,7 @@ raw provider errors. `getSafeReturnTo` accepts `/`, `/portfolio`, and query
 strings on local paths, but maps absolute, protocol-relative, backslash, null,
 and control-character input to `/`.
 
-- [ ] **Step 2: Write route tests before the refactor**
+- [x] **Step 2: Write route tests before the refactor**
 
 Use an Express test server and injected OIDC/database functions. Cover these
 exact behaviors:
@@ -444,7 +444,7 @@ exact behaviors:
 - Google mode returns 409 JSON for mobile token exchange before any OIDC call.
 - Replit mode retains direct-sub upsert, provider logout, and mobile exchange.
 
-- [ ] **Step 3: Run route and page tests red**
+- [x] **Step 3: Run route and page tests red**
 
 Run:
 
@@ -454,7 +454,7 @@ node --import tsx --test artifacts/api-server/src/lib/authPages.test.ts artifact
 
 Expected: FAIL because the factory, pages, and Google branches are absent.
 
-- [ ] **Step 4: Refactor the router without changing Replit behavior**
+- [x] **Step 4: Refactor the router without changing Replit behavior**
 
 Move external operations behind `AuthRouterDependencies`. Keep a default export
 created by `createAuthRouter()`. Use `config.callbackUrl` only for Google; the
@@ -462,7 +462,7 @@ legacy forwarded-origin helper remains confined to the Replit branch. Clear
 the transient `code_verifier`, `nonce`, `state`, and `return_to` cookies on all
 callback success and failure exits.
 
-- [ ] **Step 5: Add the mapped Google callback**
+- [x] **Step 5: Add the mapped Google callback**
 
 Require verified string `iss` and `sub` claims. Canonicalize Google's legacy
 `accounts.google.com` issuer to `https://accounts.google.com`; reject every
@@ -479,7 +479,7 @@ const session: GoogleSessionData = {
 Do not store `tokens.access_token`, `tokens.refresh_token`, email ownership, or
 a new internal user.
 
-- [ ] **Step 6: Add the unmapped setup path and recoverable error page**
+- [x] **Step 6: Add the unmapped setup path and recoverable error page**
 
 Store a ten-minute `google_identity_setup` record behind a separate
 `identity_setup_sid` HttpOnly cookie. The setup page says that no portfolio has
@@ -488,7 +488,7 @@ and subject required by the operator command, and asks the user to return after
 the administrator confirms the binding. It exposes no database user list and
 has no POST/admin endpoint.
 
-- [ ] **Step 7: Run auth tests and the protected-route regression**
+- [x] **Step 7: Run auth tests and the protected-route regression**
 
 Run:
 
@@ -501,7 +501,7 @@ pnpm --filter @workspace/api-server run typecheck
 Expected: auth tests pass, another user's protected records remain 404, and
 typecheck exits 0.
 
-- [ ] **Step 8: Commit Google browser auth**
+- [x] **Step 8: Commit Google browser auth**
 
 ```powershell
 git add artifacts/api-server/src/lib/authPages.ts artifacts/api-server/src/lib/authPages.test.ts artifacts/api-server/src/routes/auth.ts artifacts/api-server/src/routes/auth.test.ts artifacts/api-server/src/routes/index.ts
