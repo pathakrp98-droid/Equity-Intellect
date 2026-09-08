@@ -18,6 +18,7 @@ export * from './auditEntry';
 export * from './authorizationSessionHeaderParameter';
 export * from './authUser';
 export * from './authUserEnvelope';
+export * from './authUserEnvelopeAuthProvider';
 export * from './beginBrowserLoginParams';
 export * from './biasFlag';
 export * from './brokerageAction';

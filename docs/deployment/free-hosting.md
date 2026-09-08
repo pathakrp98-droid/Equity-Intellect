@@ -4,8 +4,8 @@
 
 This repository is prepared for one same-origin Node web service, but nothing
 has been deployed and no account, database, OAuth client, or paid resource has
-been created. Do not apply `render.yaml` yet: Google sign-in and the explicit
-legacy-owner binding still need their tested migration.
+been created. Do not apply `render.yaml` yet: the recovered data, exact Google
+account, and existing AlphaDesk owner still require approval and verification.
 
 The only saved archive currently available is a **development database**
 archive. It is not a verified production backup. It has not been restored, and
@@ -74,10 +74,30 @@ never receive `index.html`.
 | `NODE_VERSION`         | `24.19.0` for the reviewed build.                                                                           |
 | `AI_REQUESTS_ENABLED`  | Literal `false`.                                                                                            |
 | `OPENAI_API_KEY`       | Omit entirely.                                                                                              |
+| `AUTH_PROVIDER`        | Literal `google` for the new deployment.                                                                    |
+| `APP_ORIGIN`           | Exact final Render HTTPS origin, with no path or trailing slash.                                            |
+| `GOOGLE_CLIENT_ID`     | Approved Google web OAuth client ID, installed as a secret.                                                 |
+| `GOOGLE_CLIENT_SECRET` | Matching Google web OAuth client secret, installed as a secret.                                             |
 
-Google variables are intentionally absent until the authentication plan is
-implemented and verified. The existing Replit issuer is compatibility code,
-not the identity mechanism for the new deployment.
+Register this exact authorized redirect URI in the approved Google web OAuth
+client:
+
+```text
+${APP_ORIGIN}/api/callback
+```
+
+Google mode never chooses an AlphaDesk owner by email. On the first sign-in by
+an unmapped account, `/api/auth/setup` says that no portfolio data has been
+opened and displays the verified issuer and subject. Only after the user
+verifies that displayed Google account and the exact existing internal user ID,
+bind the identity from a built workspace:
+
+```powershell
+pnpm --filter @workspace/api-server auth:bind -- --issuer https://accounts.google.com --subject GOOGLE_SUB_FROM_SETUP_PAGE --user-id EXISTING_INTERNAL_USER_ID
+```
+
+Then sign in again. The existing Replit issuer remains compatibility code only;
+the Render blueprint intentionally contains no `ISSUER_URL` or `REPL_ID`.
 
 ## Approval gates
 
@@ -88,11 +108,19 @@ Each item below requires confirmation at the moment it is performed:
    without `--clean`, then verify counts, ownership, holdings, saved research,
    and an empty sessions table.
 3. Ask the user whether that recovered snapshot is the portfolio to migrate.
-4. Create the Google OAuth client and bind the verified issuer/subject to the
-   existing internal owner ID. Never bind by email.
-5. Upload the approved private data to the named Neon project.
-6. Create the Render Free service from `render.yaml`, install secrets, and
-   deploy. Stop on any billing, trial, card, or upgrade prompt.
+4. Create the Google web OAuth client with the exact callback above.
+5. Install the three Google variables—`APP_ORIGIN`, `GOOGLE_CLIENT_ID`, and
+   `GOOGLE_CLIENT_SECRET`—only into the approved deployment's secret store.
+6. Upload the approved private data to the named Neon project.
+7. After the user verifies the setup page's Google account and exact existing
+   internal user ID, run the identity-binding command against that migrated
+   database. Never bind by email.
+8. Create the Render Free service from `render.yaml` and deploy. Stop on any
+   billing, trial, card, or upgrade prompt.
+
+OAuth client creation, secret installation, identity binding against migrated
+data, and deployment are four separate action-time approvals. Approval of one
+does not authorize the next.
 
 ## Smoke checks after an approved deployment
 

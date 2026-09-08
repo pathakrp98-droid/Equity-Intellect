@@ -1079,8 +1079,17 @@ export interface AuthUser {
   profileImageUrl: string | null;
 }
 
+export type AuthUserEnvelopeAuthProvider = typeof AuthUserEnvelopeAuthProvider[keyof typeof AuthUserEnvelopeAuthProvider];
+
+
+export const AuthUserEnvelopeAuthProvider = {
+  replit: 'replit',
+  google: 'google',
+} as const;
+
 export interface AuthUserEnvelope {
   user: AuthUser | null;
+  authProvider: AuthUserEnvelopeAuthProvider;
 }
 
 export interface MobileTokenExchangeRequest {

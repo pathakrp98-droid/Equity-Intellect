@@ -302,6 +302,7 @@ export function createAuthRouter(
     res.json(
       GetCurrentAuthUserResponse.parse({
         user: req.isAuthenticated() ? req.user : null,
+        authProvider: dependencies.getAuthConfig().provider,
       }),
     );
   });

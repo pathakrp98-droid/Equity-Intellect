@@ -16,6 +16,14 @@ services:
         value: production
       - key: AI_REQUESTS_ENABLED
         value: "false"
+      - key: AUTH_PROVIDER
+        value: google
+      - key: APP_ORIGIN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: CORS_ALLOWED_ORIGINS

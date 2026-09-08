@@ -533,7 +533,7 @@ git commit -m "feat: add mapped Google browser sign-in"
 - Produces `getSignInLabel(provider)` returning `Sign in with Google` only for
   Google and `Sign in` for Replit/unknown.
 
-- [ ] **Step 1: Write provider-copy tests**
+- [x] **Step 1: Write provider-copy tests**
 
 ```ts
 assert.equal(getSignInLabel("google"), "Sign in with Google");
@@ -541,7 +541,7 @@ assert.equal(getSignInLabel("replit"), "Sign in");
 assert.equal(getSignInLabel(undefined), "Sign in");
 ```
 
-- [ ] **Step 2: Update and regenerate the API contract**
+- [x] **Step 2: Update and regenerate the API contract**
 
 Add a required `authProvider` enum to `AuthUserEnvelope`, change logout summary
 to `Clear the application session`, and document that mobile exchange returns
@@ -553,14 +553,14 @@ pnpm --filter @workspace/api-spec run codegen
 
 Inspect generated diffs and reject unrelated generated contract changes.
 
-- [ ] **Step 3: Update the hook and banner**
+- [x] **Step 3: Update the hook and banner**
 
 Parse `authProvider` fail-closed as undefined on network/schema failure. Render
 the provider-aware button copy without changing the existing relative
 same-origin login/logout URLs. Keep the existing loading state, keyboard button
 behavior, and responsive sidebar layout.
 
-- [ ] **Step 4: Add configuration without credentials**
+- [x] **Step 4: Add configuration without credentials**
 
 The example documents both modes. The Render blueprint contains:
 
@@ -579,7 +579,7 @@ Remove Google-inapplicable `ISSUER_URL`/`REPL_ID` from Render only; keep them in
 `.env.example` under a clearly marked legacy mode. Do not place real values in
 Git.
 
-- [ ] **Step 5: Extend the runbook approval gates**
+- [x] **Step 5: Extend the runbook approval gates**
 
 Document the exact registered callback `${APP_ORIGIN}/api/callback`, the three
 Google secret variables, the unmapped setup page, and the binding command.
@@ -588,7 +588,7 @@ Google account and exact existing internal user ID. Keep OAuth client creation,
 secret installation, identity binding against migrated data, and deployment as
 separate action-time approvals.
 
-- [ ] **Step 6: Run frontend auth tests and typecheck**
+- [x] **Step 6: Run frontend auth tests and typecheck**
 
 ```powershell
 node --import tsx --test lib/replit-auth-web/src/authCopy.test.ts
@@ -599,7 +599,7 @@ pnpm --filter @workspace/portfolio-intelligence run build
 Expected: provider copy tests pass, all workspaces typecheck, and the frontend
 production build exits 0.
 
-- [ ] **Step 7: Commit provider-aware product copy**
+- [x] **Step 7: Commit provider-aware product copy**
 
 ```powershell
 git add lib/api-spec/openapi.yaml lib/api-zod/src/generated lib/api-client-react/src/generated lib/replit-auth-web/src/use-auth.ts lib/replit-auth-web/src/authCopy.ts lib/replit-auth-web/src/authCopy.test.ts artifacts/portfolio-intelligence/src/components/auth/AuthBanner.tsx .env.example render.yaml docs/deployment/free-hosting.md

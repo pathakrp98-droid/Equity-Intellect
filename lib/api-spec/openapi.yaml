@@ -70,7 +70,7 @@ paths:
     get:
       tags: [auth]
       operationId: logoutBrowserSession
-      summary: Clear session and begin OIDC logout
+      summary: Clear the application session
       parameters:
         - $ref: '#/components/parameters/AuthorizationSessionHeader'
         - $ref: '#/components/parameters/SessionCookie'
@@ -95,6 +95,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MobileTokenExchangeSuccess'
+        '409':
+          description: Native token exchange is unavailable in Google web mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /mobile-auth/logout:
     post:
       tags: [auth]
@@ -2060,12 +2066,15 @@ components:
           type: [string, 'null']
     AuthUserEnvelope:
       type: object
-      required: [user]
+      required: [user, authProvider]
       properties:
         user:
           oneOf:
             - $ref: '#/components/schemas/AuthUser'
             - type: 'null'
+        authProvider:
+          type: string
+          enum: [replit, google]
     MobileTokenExchangeRequest:
       type: object
       required: [code, code_verifier, redirect_uri, state]
