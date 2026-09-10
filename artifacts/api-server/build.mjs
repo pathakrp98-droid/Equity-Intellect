@@ -18,6 +18,7 @@ async function buildAll() {
     entryPoints: {
       index: path.resolve(artifactDir, "src/index.ts"),
       "research-worker": path.resolve(artifactDir, "src/research-worker.ts"),
+      "price-refresh": path.resolve(artifactDir, "src/price-refresh.ts"),
       "bind-auth-identity": path.resolve(
         artifactDir,
         "src/scripts/bindExternalIdentity.ts",

@@ -8,9 +8,8 @@ import {
   marketNewsTable,
   marketProviderRunsTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, lt } from "drizzle-orm";
 
-import { alertService } from "../alerts/alertService";
 import { marketIntelligenceService } from "../intelligence/marketIntelligenceService";
 import type {
   MarketEventInput,
@@ -35,6 +34,7 @@ import type {
   ProviderRefreshDiagnostic,
   ProviderSymbol,
 } from "./types";
+import type { AutomaticPriceRefreshResult } from "./priceRefreshScheduler";
 
 export interface UpdateLiveDataPreferencesInput {
   providerPriority?: string[];
@@ -62,10 +62,16 @@ type RefreshMode = "all" | "quotes";
 export type DailyRefreshResult =
   | {
       attempted: false;
-      reason: "no_provider_configured" | "already_refreshed_today";
+      reason:
+        | "already_refreshed_today"
+        | "concurrent_refresh"
+        | "attempt_limit"
+        | "retry_not_due"
+        | "concurrent_attempt";
     }
   | {
       attempted: true;
+      status: "fresh" | "partial" | "failed";
       refreshedAt: Date;
       diagnostics: ProviderRefreshDiagnostic[];
       alertEvaluation?: {
@@ -120,63 +126,28 @@ class LiveDataService {
   }
 
   private async runDailyRefresh(userId: string): Promise<DailyRefreshResult> {
-    if (!listLiveDataProviders().some((provider) => provider.isConfigured())) {
-      return { attempted: false, reason: "no_provider_configured" as const };
+    const [{ runAutomaticPriceRefreshForUser }, { createProductionPriceRefreshDependencies }] =
+      await Promise.all([
+        import("./priceRefreshScheduler"),
+        import("./priceRefreshRuntime"),
+      ]);
+    const result: AutomaticPriceRefreshResult =
+      await runAutomaticPriceRefreshForUser(
+        { userId, workerId: `page:${process.pid}` },
+        createProductionPriceRefreshDependencies(),
+      );
+    if (!result.attempted) {
+      switch (result.reason) {
+        case "already_fresh":
+          return { attempted: false, reason: "already_refreshed_today" };
+        case "concurrent_refresh":
+        case "attempt_limit":
+        case "retry_not_due":
+        case "concurrent_attempt":
+          return { attempted: false, reason: result.reason };
+      }
     }
-    const recentSuccessfulRuns = await db
-      .select({
-        startedAt: marketProviderRunsTable.startedAt,
-        metadata: marketProviderRunsTable.metadata,
-      })
-      .from(marketProviderRunsTable)
-      .where(
-        and(
-          eq(marketProviderRunsTable.userId, userId),
-          inArray(marketProviderRunsTable.status, ["success", "partial"]),
-        ),
-      )
-      .orderBy(desc(marketProviderRunsTable.startedAt))
-      .limit(20);
-    const latestQuoteRun = recentSuccessfulRuns.find((run) => {
-      const diagnostics = Array.isArray(run.metadata?.diagnostics)
-        ? run.metadata.diagnostics
-        : [];
-      return diagnostics.some((diagnostic) => {
-        if (!diagnostic || typeof diagnostic !== "object") return false;
-        const item = diagnostic as Record<string, unknown>;
-        return (
-          ["quotes", "snapshot"].includes(String(item.capability)) &&
-          ["success", "cached", "stale_fallback"].includes(
-            String(item.status),
-          ) &&
-          Number(item.records) > 0
-        );
-      });
-    });
-    const due =
-      !latestQuoteRun ||
-      Date.now() - latestQuoteRun.startedAt.getTime() >= 24 * 60 * 60 * 1000;
-    if (!due) {
-      return { attempted: false, reason: "already_refreshed_today" as const };
-    }
-    const result = await this.refresh(userId, { force: false });
-    const alertEvaluation = result.preferences.autoEvaluateAlerts
-      ? await alertService.evaluate(userId)
-      : null;
-    return {
-      attempted: true,
-      refreshedAt: result.refreshedAt,
-      diagnostics: result.diagnostics,
-      ...(alertEvaluation
-        ? {
-            alertEvaluation: {
-              evaluatedAt: alertEvaluation.evaluatedAt,
-              candidates: alertEvaluation.candidates,
-              alertsUpserted: alertEvaluation.alertsUpserted,
-            },
-          }
-        : {}),
-    };
+    return result;
   }
 
   async getPreferences(userId: string) {
