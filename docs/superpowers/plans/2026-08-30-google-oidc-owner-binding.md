@@ -620,7 +620,7 @@ git commit -m "feat: prepare Google sign-in deployment"
 - Produces a locally committed, not-pushed auth migration ready for the later
   disposable database restore and credential approval gates.
 
-- [ ] **Step 1: Run all auth and database tests**
+- [x] **Step 1: Run all auth and database tests**
 
 ```powershell
 node --import tsx --test artifacts/api-server/src/lib/authConfig.test.ts artifacts/api-server/src/lib/authSession.test.ts artifacts/api-server/src/lib/authPages.test.ts artifacts/api-server/src/middlewares/authMiddleware.test.ts artifacts/api-server/src/routes/auth.test.ts artifacts/api-server/src/services/auth/externalIdentityRepository.test.ts artifacts/api-server/src/scripts/bindExternalIdentity.test.ts lib/db/src/schema/auth.test.ts
@@ -629,7 +629,7 @@ pnpm run test:db
 
 Expected: all tests PASS with no real OIDC or database network call.
 
-- [ ] **Step 2: Run existing product regressions**
+- [x] **Step 2: Run existing product regressions**
 
 ```powershell
 pnpm run test:research
@@ -639,7 +639,7 @@ node --import tsx --test artifacts/api-server/src/routes/capabilities.test.ts ar
 Expected: database tenancy, saved research, disabled AI, and frontend hosting
 tests all remain green.
 
-- [ ] **Step 3: Prove fail-closed runtime configuration**
+- [x] **Step 3: Prove fail-closed runtime configuration**
 
 Build the API, then start it once with
 `AUTH_PROVIDER=google` and no Google secret. Expected: startup exits nonzero
@@ -648,7 +648,7 @@ with `AUTH_PROVIDER=replit`, the legacy variables, AI disabled, and a disposable
 database URL; expected: health and capability routes work without invoking
 OIDC.
 
-- [ ] **Step 4: Run final typecheck and production build**
+- [x] **Step 4: Run final typecheck and production build**
 
 ```powershell
 pnpm run typecheck
@@ -659,13 +659,13 @@ git diff --check
 Expected: every command exits 0. The existing Vite sourcemap-location warnings
 may remain, but there are no type, test, or build failures.
 
-- [ ] **Step 5: Review the staged release boundary**
+- [x] **Step 5: Review the staged release boundary**
 
 Confirm `git status --short` contains no dump, `.env`, token, Google client
 value, session row, or generated build artifact. Confirm `render.yaml` still
 declares only one `plan: free` web service and `AI_REQUESTS_ENABLED=false`.
 
-- [ ] **Step 6: Commit verification metadata only when changed**
+- [x] **Step 6: Commit verification metadata only when changed**
 
 Mark every completed checkbox in this plan, stage only this plan if it changed,
 and commit:
