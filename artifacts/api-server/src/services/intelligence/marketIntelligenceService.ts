@@ -136,18 +136,25 @@ class MarketIntelligenceService {
     userId: string,
     payload: MarketImportPayload,
     providerOverride?: string,
-    options: { syncPortfolioPrices?: boolean } = {},
+    options: {
+      syncPortfolioPrices?: boolean;
+      emitResearchTriggers?: boolean;
+      preserveExplicitManualPrices?: boolean;
+    } = {},
   ) {
     const tickers = await this.getPortfolioTickers(userId);
     const normalized = normalizeMarketImport(
       { ...payload, provider: providerOverride ?? payload.provider },
       tickers,
     );
-    const researchTriggers = buildMaterialResearchTriggers(
-      userId,
-      normalized,
-      new Set(tickers.map((ticker) => ticker.trim().toUpperCase())),
-    );
+    const researchTriggers =
+      options.emitResearchTriggers === false
+        ? []
+        : buildMaterialResearchTriggers(
+            userId,
+            normalized,
+            new Set(tickers.map((ticker) => ticker.trim().toUpperCase())),
+          );
 
     await db.transaction(async (tx) => {
       for (const point of normalized.points) {
@@ -256,7 +263,9 @@ class MarketIntelligenceService {
         asOf: point.asOf,
       }));
     if (equityPrices.length > 0 && options.syncPortfolioPrices !== false) {
-      await portfolioService.setMarketPrices(userId, equityPrices);
+      await portfolioService.setMarketPrices(userId, equityPrices, undefined, {
+        preserveExplicitManual: options.preserveExplicitManualPrices,
+      });
     }
 
     return {

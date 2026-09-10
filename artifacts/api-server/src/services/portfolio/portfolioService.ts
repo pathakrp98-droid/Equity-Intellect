@@ -28,6 +28,7 @@ import {
 } from "./engine";
 import { buildHoldingsCsvTemplate, parseHoldingsCsv } from "./holdingsCsv";
 import { buildHoldingResearchTrigger } from "../research/automation/researchTriggers";
+import { shouldReplaceMarketPrice } from "../liveData/quoteRefreshPolicy";
 
 export interface CreateTransactionInput {
   portfolioId?: number;
@@ -463,14 +464,38 @@ export class PortfolioService {
     userId: string,
     prices: MarketPriceInput[],
     portfolioId?: number,
+    options: { preserveExplicitManual?: boolean } = {},
   ) {
     const portfolio = await this.getPortfolio(userId, portfolioId);
+    const existingSources = options.preserveExplicitManual
+      ? new Map(
+          (
+            await db
+              .select({
+                ticker: portfolioMarketPricesTable.ticker,
+                source: portfolioMarketPricesTable.source,
+              })
+              .from(portfolioMarketPricesTable)
+              .where(
+                eq(portfolioMarketPricesTable.portfolioId, portfolio.id),
+              )
+          ).map((row) => [row.ticker, row.source]),
+        )
+      : new Map<string, string>();
 
     for (const input of prices) {
       const ticker = normalizeTicker(input.ticker);
       if (!ticker) throw new Error("ticker is required for every market price");
-      if (!Number.isFinite(input.price) || input.price < 0) {
+      if (!Number.isFinite(input.price) || input.price <= 0) {
         throw new Error(`Invalid market price for ${ticker}`);
+      }
+      if (
+        !shouldReplaceMarketPrice(
+          existingSources.get(ticker),
+          options.preserveExplicitManual ?? false,
+        )
+      ) {
+        continue;
       }
 
       await db

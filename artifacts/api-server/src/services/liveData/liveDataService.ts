@@ -26,6 +26,10 @@ import {
   stableSymbolCacheKey,
 } from "./cachePolicy";
 import { listLiveDataProviders } from "./providerRegistry";
+import {
+  isUsableQuoteValue,
+  providerSupportsQuoteOnlyRefresh,
+} from "./quoteRefreshPolicy";
 import type {
   LiveDataProvider,
   ProviderRefreshDiagnostic,
@@ -53,6 +57,7 @@ export interface UpsertSymbolMappingInput {
 
 type Capability =
   "snapshot" | "quotes" | "news" | "calendar" | "corporateActions";
+type RefreshMode = "all" | "quotes";
 
 export type DailyRefreshResult =
   | {
@@ -514,13 +519,30 @@ class LiveDataService {
   }
 
   async refresh(userId: string, options: { force?: boolean } = {}) {
+    return this.refreshInternal(userId, { ...options, mode: "all" });
+  }
+
+  async refreshQuotes(userId: string, options: { force?: boolean } = {}) {
+    return this.refreshInternal(userId, { ...options, mode: "quotes" });
+  }
+
+  private async refreshInternal(
+    userId: string,
+    options: { force?: boolean; mode: RefreshMode },
+  ) {
     const preferences = await this.getPreferences(userId);
     const providersByName = new Map(
       listLiveDataProviders().map((provider) => [provider.name, provider]),
     );
     const orderedProviders = preferences.providerPriority
       .map((name) => providersByName.get(name))
-      .filter((provider): provider is LiveDataProvider => Boolean(provider));
+      .filter((provider): provider is LiveDataProvider => Boolean(provider))
+      .filter(
+        (provider) =>
+          options.mode === "all" ||
+          (providerSupportsQuoteOnlyRefresh(provider.capabilities) &&
+            Boolean(provider.fetchQuotes)),
+      );
     const diagnostics: ProviderRefreshDiagnostic[] = [];
     const imports: Array<{
       provider: string;
@@ -534,6 +556,8 @@ class LiveDataService {
       calendar: false,
       corporateActions: false,
     };
+    const expectedSymbols = new Set<string>();
+    const receivedSymbols = new Set<string>();
 
     for (const provider of orderedProviders) {
       const startedAt = new Date();
@@ -565,6 +589,7 @@ class LiveDataService {
         provider,
         preferences.maxSymbolsPerRefresh,
       );
+      for (const symbol of symbols) expectedSymbols.add(symbol.ticker);
       const context = { symbols, now: startedAt };
       let payload: MarketImportPayload = {
         provider: provider.name,
@@ -574,7 +599,11 @@ class LiveDataService {
         events: [],
       };
 
-      if (provider.capabilities.snapshot && provider.fetchSnapshot) {
+      if (
+        options.mode === "all" &&
+        provider.capabilities.snapshot &&
+        provider.fetchSnapshot
+      ) {
         const result = await this.fetchWithCache({
           userId,
           provider,
@@ -608,8 +637,11 @@ class LiveDataService {
             force: options.force ?? false,
             fetcher: () => provider.fetchQuotes!(context),
           });
+          const usablePoints = (result.data ?? []).filter((point) =>
+            isUsableQuoteValue(point.value),
+          );
           const returnedTickers = new Set(
-            (result.data ?? []).map((point) => point.symbol.toUpperCase()),
+            usablePoints.map((point) => point.symbol.toUpperCase()),
           );
           const missingTickers = symbols
             .map((symbol) => symbol.ticker.toUpperCase())
@@ -623,9 +655,11 @@ class LiveDataService {
                 }
               : result.diagnostic,
           );
-          payload.points = result.data ?? [];
+          for (const ticker of returnedTickers) receivedSymbols.add(ticker);
+          payload.points = usablePoints;
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.news &&
           provider.capabilities.news &&
           provider.fetchNews
@@ -645,6 +679,7 @@ class LiveDataService {
           payload.news = result.data ?? [];
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.calendar &&
           provider.capabilities.calendar &&
           provider.fetchCalendar
@@ -664,6 +699,7 @@ class LiveDataService {
           payload.events = [...(payload.events ?? []), ...(result.data ?? [])];
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.corporateActions &&
           provider.capabilities.corporateActions &&
           provider.fetchCorporateActions
@@ -698,7 +734,11 @@ class LiveDataService {
           userId,
           payload,
           provider.name,
-          { syncPortfolioPrices: preferences.autoSyncPortfolio },
+          {
+            syncPortfolioPrices: preferences.autoSyncPortfolio,
+            emitResearchTriggers: options.mode === "all",
+            preserveExplicitManualPrices: options.mode === "quotes",
+          },
         );
         imports.push({ provider: provider.name, imported });
         if ((payload.points?.length ?? 0) > 0)
@@ -760,6 +800,8 @@ class LiveDataService {
       imports,
       diagnostics,
       satisfiedCapabilities: capabilitySatisfied,
+      expectedSymbols: expectedSymbols.size,
+      receivedSymbols: receivedSymbols.size,
       preferences,
     };
   }
