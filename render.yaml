@@ -7,7 +7,7 @@ services:
     runtime: node
     plan: free
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build
-    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    startCommand: pnpm --filter @workspace/db migrate && node --enable-source-maps artifacts/api-server/dist/index.mjs
     healthCheckPath: /api/healthz
     envVars:
       - key: NODE_VERSION

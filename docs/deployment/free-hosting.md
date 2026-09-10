@@ -137,3 +137,42 @@ does not authorize the next.
 If any ownership, restore, billing, or verification check fails, stop the
 cutover. Preserve the source databases and private backups; do not overwrite an
 existing database or delete the old data.
+
+## Daily prices while the web service sleeps
+
+The repository now contains a finite, quote-only command and a GitHub Actions
+workflow for weekday price refreshes. The workflow is **disabled by default**:
+scheduled events skip the job unless the repository variable
+`ENABLE_PRICE_REFRESH_SCHEDULE` is exactly `true`. Do not create that variable
+until GitHub's billing page visibly confirms that the repository/account has
+enough included Actions usage and cannot create a payment or overage charge.
+
+Recheck GitHub's current Actions billing rules immediately before enabling:
+
+- <https://docs.github.com/en/billing/concepts/product-billing/github-actions>
+- <https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-variables>
+
+The workflow runs at 10:47 UTC (16:17 India time) Monday through Friday. It has
+read-only repository permission, a ten-minute timeout, pinned official actions,
+and receives only the `ALPHADESK_DATABASE_URL` secret. It explicitly disables
+AI and has no OpenAI, Google, Render, or Replit secret. It applies only reviewed
+additive database migrations, discovers owners with active holdings from the
+database, and runs the same quote path available in the app. It does not run
+research, news, calendar, or corporate-action providers.
+
+After a separate action-time approval, add the database connection string as
+the repository secret `ALPHADESK_DATABASE_URL`. A manual **Run workflow** is
+also approval-gated because it sends that secret to a GitHub-hosted runner.
+Verify a manual run and the portfolio's price statuses before enabling the
+recurring variable.
+
+Automatic attempts are recorded per owner and Asia/Kolkata day. One initial
+attempt plus two retries are allowed, at least 30 minutes apart. A fully fresh
+result ends automatic work for that day; partial or failed coverage remains
+visible as stale/error status and can retry. Explicit market prices entered as
+manual overrides are never replaced by the automatic path. Authenticated
+in-app refresh remains available if the workflow stays disabled.
+
+To disable recurring work, delete the variable or set it to any value other
+than `true`. Do not delete quote history, leases, or attempt records. Disabling
+the schedule does not affect manual prices or on-demand refresh.
