@@ -5,14 +5,19 @@ import { OpenAIResponsesProvider } from "./openaiProvider";
 
 test("uses the Responses API with non-persistent structured output", async () => {
   const originalFetch = globalThis.fetch;
+  const originalAiRequestsEnabled = process.env.AI_REQUESTS_ENABLED;
   const originalKey = process.env.OPENAI_API_KEY;
   const originalModel = process.env.OPENAI_MODEL;
   let requestBody: Record<string, unknown> | null = null;
 
+  process.env.AI_REQUESTS_ENABLED = "true";
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_MODEL = "test-model";
   globalThis.fetch = async (_input, init) => {
-    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
     return new Response(
       JSON.stringify({
         output: [
@@ -63,8 +68,10 @@ test("uses the Responses API with non-persistent structured output", async () =>
     assert.equal(result.provider, "openai_responses");
     assert.equal(result.model, "test-model");
     assert.equal(result.answer.citations[0]?.sourceId, "S1");
-    const capturedRequestBody =
-      requestBody as unknown as Record<string, unknown>;
+    const capturedRequestBody = requestBody as unknown as Record<
+      string,
+      unknown
+    >;
     assert.equal(capturedRequestBody.store, false);
     assert.equal(capturedRequestBody.model, "test-model");
     assert.equal(
@@ -74,9 +81,50 @@ test("uses the Responses API with non-persistent structured output", async () =>
     );
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalAiRequestsEnabled === undefined)
+      delete process.env.AI_REQUESTS_ENABLED;
+    else process.env.AI_REQUESTS_ENABLED = originalAiRequestsEnabled;
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = originalKey;
     if (originalModel === undefined) delete process.env.OPENAI_MODEL;
     else process.env.OPENAI_MODEL = originalModel;
+  }
+});
+
+test("blocks paid OpenAI requests when AI is not explicitly enabled", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalAiRequestsEnabled = process.env.AI_REQUESTS_ENABLED;
+  const originalKey = process.env.OPENAI_API_KEY;
+  let calls = 0;
+
+  process.env.AI_REQUESTS_ENABLED = "false";
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("fetch must not be reached while paid AI is disabled");
+  };
+
+  try {
+    const provider = new OpenAIResponsesProvider();
+    assert.equal(provider.isConfigured(), false);
+    await assert.rejects(
+      provider.generate({
+        userId: "user-1",
+        mode: "portfolio_review",
+        question: "Review the portfolio",
+        messages: [],
+        memories: [],
+        sources: [],
+      }),
+      /Paid AI requests are disabled\./,
+    );
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalAiRequestsEnabled === undefined)
+      delete process.env.AI_REQUESTS_ENABLED;
+    else process.env.AI_REQUESTS_ENABLED = originalAiRequestsEnabled;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
   }
 });

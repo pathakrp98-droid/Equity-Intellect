@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AuthUser } from './authUser';
+import type { AuthUserEnvelopeAuthProvider } from './authUserEnvelopeAuthProvider';
 
 export interface AuthUserEnvelope {
   user: AuthUser | null;
+  authProvider: AuthUserEnvelopeAuthProvider;
 }

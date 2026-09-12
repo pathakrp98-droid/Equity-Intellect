@@ -1,11 +1,12 @@
-import { useAuth } from "@workspace/replit-auth-web";
+import { getSignInLabel, useAuth } from "@workspace/replit-auth-web";
 import { Button } from "@/components/ui/button";
 import { LogIn, LogOut, User, Shield, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export function AuthBanner() {
-  const { user, isLoading, isAuthenticated, login, logout } = useAuth();
+  const { user, authProvider, isLoading, isAuthenticated, login, logout } =
+    useAuth();
   const [open, setOpen] = useState(false);
 
   if (isLoading) {
@@ -20,7 +21,9 @@ export function AuthBanner() {
   if (!isAuthenticated) {
     return (
       <div className="px-3 py-2 border border-primary/20 rounded-lg bg-primary/5 mx-1 mb-2">
-        <p className="text-[10px] text-muted-foreground mb-2 leading-tight">Sign in to save watchlist, guardrail settings, and audit trail</p>
+        <p className="text-[10px] text-muted-foreground mb-2 leading-tight">
+          Sign in to save watchlist, guardrail settings, and audit trail
+        </p>
         <Button
           size="sm"
           variant="outline"
@@ -28,36 +31,59 @@ export function AuthBanner() {
           onClick={login}
         >
           <LogIn className="w-3 h-3 mr-1.5" />
-          Sign in
+          {getSignInLabel(authProvider)}
         </Button>
       </div>
     );
   }
 
-  const initials = [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join("") || user?.email?.[0]?.toUpperCase() || "U";
-  const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "User";
+  const initials =
+    [user?.firstName?.[0], user?.lastName?.[0]].filter(Boolean).join("") ||
+    user?.email?.[0]?.toUpperCase() ||
+    "U";
+  const displayName =
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    user?.email ||
+    "User";
 
   return (
     <div className="relative mx-1 mb-2">
       <button
         className={cn(
           "w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left transition-colors",
-          open ? "bg-secondary border-border" : "border-transparent hover:bg-secondary/50"
+          open
+            ? "bg-secondary border-border"
+            : "border-transparent hover:bg-secondary/50",
         )}
         onClick={() => setOpen((v) => !v)}
       >
         <div className="w-6 h-6 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center shrink-0">
           {user?.profileImageUrl ? (
-            <img src={user.profileImageUrl} className="w-full h-full rounded-full object-cover" alt="" />
+            <img
+              src={user.profileImageUrl}
+              className="w-full h-full rounded-full object-cover"
+              alt=""
+            />
           ) : (
-            <span className="text-[10px] font-semibold text-primary">{initials}</span>
+            <span className="text-[10px] font-semibold text-primary">
+              {initials}
+            </span>
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium truncate text-foreground">{displayName}</p>
-          <p className="text-[10px] text-emerald-500 font-medium">● Active session</p>
+          <p className="text-xs font-medium truncate text-foreground">
+            {displayName}
+          </p>
+          <p className="text-[10px] text-emerald-500 font-medium">
+            ● Active session
+          </p>
         </div>
-        <ChevronDown className={cn("w-3 h-3 text-muted-foreground shrink-0 transition-transform", open && "rotate-180")} />
+        <ChevronDown
+          className={cn(
+            "w-3 h-3 text-muted-foreground shrink-0 transition-transform",
+            open && "rotate-180",
+          )}
+        />
       </button>
 
       {open && (
@@ -69,7 +95,10 @@ export function AuthBanner() {
           <div className="border-t my-1" />
           <button
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-            onClick={() => { setOpen(false); logout(); }}
+            onClick={() => {
+              setOpen(false);
+              logout();
+            }}
           >
             <LogOut className="w-3 h-3" />
             Sign out

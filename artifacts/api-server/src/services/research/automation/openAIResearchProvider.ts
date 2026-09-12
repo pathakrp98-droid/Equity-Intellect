@@ -10,6 +10,7 @@ import {
   type SecurityType,
 } from "@workspace/research-contracts";
 
+import { openAiAvailable } from "../../../lib/aiPolicy";
 import { classifyEvidenceTier, normalizeCanonicalUrl } from "./evidenceQuality";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -653,15 +654,17 @@ export class OpenAIResearchProvider implements ResearchProvider {
   }
 
   isConfigured(): boolean {
-    return Boolean(process.env.OPENAI_API_KEY?.trim());
+    return openAiAvailable();
   }
 
   private async request(
     body: Record<string, unknown>,
     timeoutMs: number,
   ): Promise<ParsedProviderResponse> {
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) throw new ResearchProviderError("provider_unconfigured");
+    if (!openAiAvailable()) {
+      throw new ResearchProviderError("provider_unconfigured");
+    }
+    const apiKey = process.env.OPENAI_API_KEY!.trim();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

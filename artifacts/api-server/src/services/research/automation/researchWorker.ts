@@ -1,3 +1,5 @@
+import { aiRequestsEnabled } from "../../../lib/aiPolicy";
+
 export interface ResearchWorkerEvent {
   id: number;
   userId?: string;
@@ -133,6 +135,8 @@ export async function runResearchBatch(
   options: RunResearchBatchOptions,
   dependencies: ResearchWorkerDependencies,
 ): Promise<ResearchBatchSummary> {
+  if (!aiRequestsEnabled()) return emptySummary(false);
+
   const id = workerId(options.workerId);
   const now = options.now ?? new Date();
   const maxEvents = bounded(options.maxEvents ?? 50, 1, 250);

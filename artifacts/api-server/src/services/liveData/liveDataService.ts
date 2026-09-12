@@ -8,9 +8,8 @@ import {
   marketNewsTable,
   marketProviderRunsTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, lt } from "drizzle-orm";
 
-import { alertService } from "../alerts/alertService";
 import { marketIntelligenceService } from "../intelligence/marketIntelligenceService";
 import type {
   MarketEventInput,
@@ -26,11 +25,16 @@ import {
   stableSymbolCacheKey,
 } from "./cachePolicy";
 import { listLiveDataProviders } from "./providerRegistry";
+import {
+  isUsableQuoteValue,
+  providerSupportsQuoteOnlyRefresh,
+} from "./quoteRefreshPolicy";
 import type {
   LiveDataProvider,
   ProviderRefreshDiagnostic,
   ProviderSymbol,
 } from "./types";
+import type { AutomaticPriceRefreshResult } from "./priceRefreshScheduler";
 
 export interface UpdateLiveDataPreferencesInput {
   providerPriority?: string[];
@@ -53,14 +57,21 @@ export interface UpsertSymbolMappingInput {
 
 type Capability =
   "snapshot" | "quotes" | "news" | "calendar" | "corporateActions";
+type RefreshMode = "all" | "quotes";
 
 export type DailyRefreshResult =
   | {
       attempted: false;
-      reason: "no_provider_configured" | "already_refreshed_today";
+      reason:
+        | "already_refreshed_today"
+        | "concurrent_refresh"
+        | "attempt_limit"
+        | "retry_not_due"
+        | "concurrent_attempt";
     }
   | {
       attempted: true;
+      status: "fresh" | "partial" | "failed";
       refreshedAt: Date;
       diagnostics: ProviderRefreshDiagnostic[];
       alertEvaluation?: {
@@ -115,63 +126,28 @@ class LiveDataService {
   }
 
   private async runDailyRefresh(userId: string): Promise<DailyRefreshResult> {
-    if (!listLiveDataProviders().some((provider) => provider.isConfigured())) {
-      return { attempted: false, reason: "no_provider_configured" as const };
+    const [{ runAutomaticPriceRefreshForUser }, { createProductionPriceRefreshDependencies }] =
+      await Promise.all([
+        import("./priceRefreshScheduler"),
+        import("./priceRefreshRuntime"),
+      ]);
+    const result: AutomaticPriceRefreshResult =
+      await runAutomaticPriceRefreshForUser(
+        { userId, workerId: `page:${process.pid}` },
+        createProductionPriceRefreshDependencies(),
+      );
+    if (!result.attempted) {
+      switch (result.reason) {
+        case "already_fresh":
+          return { attempted: false, reason: "already_refreshed_today" };
+        case "concurrent_refresh":
+        case "attempt_limit":
+        case "retry_not_due":
+        case "concurrent_attempt":
+          return { attempted: false, reason: result.reason };
+      }
     }
-    const recentSuccessfulRuns = await db
-      .select({
-        startedAt: marketProviderRunsTable.startedAt,
-        metadata: marketProviderRunsTable.metadata,
-      })
-      .from(marketProviderRunsTable)
-      .where(
-        and(
-          eq(marketProviderRunsTable.userId, userId),
-          inArray(marketProviderRunsTable.status, ["success", "partial"]),
-        ),
-      )
-      .orderBy(desc(marketProviderRunsTable.startedAt))
-      .limit(20);
-    const latestQuoteRun = recentSuccessfulRuns.find((run) => {
-      const diagnostics = Array.isArray(run.metadata?.diagnostics)
-        ? run.metadata.diagnostics
-        : [];
-      return diagnostics.some((diagnostic) => {
-        if (!diagnostic || typeof diagnostic !== "object") return false;
-        const item = diagnostic as Record<string, unknown>;
-        return (
-          ["quotes", "snapshot"].includes(String(item.capability)) &&
-          ["success", "cached", "stale_fallback"].includes(
-            String(item.status),
-          ) &&
-          Number(item.records) > 0
-        );
-      });
-    });
-    const due =
-      !latestQuoteRun ||
-      Date.now() - latestQuoteRun.startedAt.getTime() >= 24 * 60 * 60 * 1000;
-    if (!due) {
-      return { attempted: false, reason: "already_refreshed_today" as const };
-    }
-    const result = await this.refresh(userId, { force: false });
-    const alertEvaluation = result.preferences.autoEvaluateAlerts
-      ? await alertService.evaluate(userId)
-      : null;
-    return {
-      attempted: true,
-      refreshedAt: result.refreshedAt,
-      diagnostics: result.diagnostics,
-      ...(alertEvaluation
-        ? {
-            alertEvaluation: {
-              evaluatedAt: alertEvaluation.evaluatedAt,
-              candidates: alertEvaluation.candidates,
-              alertsUpserted: alertEvaluation.alertsUpserted,
-            },
-          }
-        : {}),
-    };
+    return result;
   }
 
   async getPreferences(userId: string) {
@@ -514,13 +490,30 @@ class LiveDataService {
   }
 
   async refresh(userId: string, options: { force?: boolean } = {}) {
+    return this.refreshInternal(userId, { ...options, mode: "all" });
+  }
+
+  async refreshQuotes(userId: string, options: { force?: boolean } = {}) {
+    return this.refreshInternal(userId, { ...options, mode: "quotes" });
+  }
+
+  private async refreshInternal(
+    userId: string,
+    options: { force?: boolean; mode: RefreshMode },
+  ) {
     const preferences = await this.getPreferences(userId);
     const providersByName = new Map(
       listLiveDataProviders().map((provider) => [provider.name, provider]),
     );
     const orderedProviders = preferences.providerPriority
       .map((name) => providersByName.get(name))
-      .filter((provider): provider is LiveDataProvider => Boolean(provider));
+      .filter((provider): provider is LiveDataProvider => Boolean(provider))
+      .filter(
+        (provider) =>
+          options.mode === "all" ||
+          (providerSupportsQuoteOnlyRefresh(provider.capabilities) &&
+            Boolean(provider.fetchQuotes)),
+      );
     const diagnostics: ProviderRefreshDiagnostic[] = [];
     const imports: Array<{
       provider: string;
@@ -534,6 +527,8 @@ class LiveDataService {
       calendar: false,
       corporateActions: false,
     };
+    const expectedSymbols = new Set<string>();
+    const receivedSymbols = new Set<string>();
 
     for (const provider of orderedProviders) {
       const startedAt = new Date();
@@ -565,6 +560,7 @@ class LiveDataService {
         provider,
         preferences.maxSymbolsPerRefresh,
       );
+      for (const symbol of symbols) expectedSymbols.add(symbol.ticker);
       const context = { symbols, now: startedAt };
       let payload: MarketImportPayload = {
         provider: provider.name,
@@ -574,7 +570,11 @@ class LiveDataService {
         events: [],
       };
 
-      if (provider.capabilities.snapshot && provider.fetchSnapshot) {
+      if (
+        options.mode === "all" &&
+        provider.capabilities.snapshot &&
+        provider.fetchSnapshot
+      ) {
         const result = await this.fetchWithCache({
           userId,
           provider,
@@ -608,8 +608,11 @@ class LiveDataService {
             force: options.force ?? false,
             fetcher: () => provider.fetchQuotes!(context),
           });
+          const usablePoints = (result.data ?? []).filter((point) =>
+            isUsableQuoteValue(point.value),
+          );
           const returnedTickers = new Set(
-            (result.data ?? []).map((point) => point.symbol.toUpperCase()),
+            usablePoints.map((point) => point.symbol.toUpperCase()),
           );
           const missingTickers = symbols
             .map((symbol) => symbol.ticker.toUpperCase())
@@ -623,9 +626,11 @@ class LiveDataService {
                 }
               : result.diagnostic,
           );
-          payload.points = result.data ?? [];
+          for (const ticker of returnedTickers) receivedSymbols.add(ticker);
+          payload.points = usablePoints;
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.news &&
           provider.capabilities.news &&
           provider.fetchNews
@@ -645,6 +650,7 @@ class LiveDataService {
           payload.news = result.data ?? [];
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.calendar &&
           provider.capabilities.calendar &&
           provider.fetchCalendar
@@ -664,6 +670,7 @@ class LiveDataService {
           payload.events = [...(payload.events ?? []), ...(result.data ?? [])];
         }
         if (
+          options.mode === "all" &&
           !capabilitySatisfied.corporateActions &&
           provider.capabilities.corporateActions &&
           provider.fetchCorporateActions
@@ -698,7 +705,11 @@ class LiveDataService {
           userId,
           payload,
           provider.name,
-          { syncPortfolioPrices: preferences.autoSyncPortfolio },
+          {
+            syncPortfolioPrices: preferences.autoSyncPortfolio,
+            emitResearchTriggers: options.mode === "all",
+            preserveExplicitManualPrices: options.mode === "quotes",
+          },
         );
         imports.push({ provider: provider.name, imported });
         if ((payload.points?.length ?? 0) > 0)
@@ -760,6 +771,8 @@ class LiveDataService {
       imports,
       diagnostics,
       satisfiedCapabilities: capabilitySatisfied,
+      expectedSymbols: expectedSymbols.size,
+      receivedSymbols: receivedSymbols.size,
       preferences,
     };
   }

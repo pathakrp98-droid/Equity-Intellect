@@ -10,6 +10,7 @@
     "@workspace/api-client-react": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "@types/react": "catalog:"
   },
   "peerDependencies": {

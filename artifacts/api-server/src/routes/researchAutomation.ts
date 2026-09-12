@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 
 import type { SecurityType } from "@workspace/research-contracts";
+import { openAiAvailable } from "../lib/aiPolicy";
 import {
   ResearchRefreshCooldownError,
   type ResearchAutomationApiService,
@@ -105,6 +106,7 @@ function authenticated(handler: AuthenticatedHandler) {
 
 export function createResearchAutomationRouter(
   service: ResearchAutomationApiService,
+  isAiAvailable: () => boolean = openAiAvailable,
 ) {
   const router = Router();
 
@@ -131,6 +133,12 @@ export function createResearchAutomationRouter(
   router.post(
     "/companies/:ticker/refresh",
     authenticated(async (req, res, userId) => {
+      if (!isAiAvailable()) {
+        res.status(503).json({
+          error: "AI generation is disabled on this deployment.",
+        });
+        return;
+      }
       const result = await service.requestRefresh(
         userId,
         normalizeTicker(req.params.ticker),

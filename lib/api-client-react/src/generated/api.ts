@@ -40,6 +40,7 @@ import type {
   DashboardSummary,
   EarningsEvent,
   EconomicEvent,
+  ErrorEnvelope,
   ErrorResponse,
   FnoData,
   GetGuardrailAuditTrail200,
@@ -348,7 +349,7 @@ export const getLogoutBrowserSessionUrl = () => {
 }
 
 /**
- * @summary Clear session and begin OIDC logout
+ * @summary Clear the application session
  */
 export const logoutBrowserSession = async ( options?: RequestInit): Promise<unknown> => {
 
@@ -395,7 +396,7 @@ export type LogoutBrowserSessionQueryError = ErrorType<void>
 
 
 /**
- * @summary Clear session and begin OIDC logout
+ * @summary Clear the application session
  */
 
 export function useLogoutBrowserSession<TData = Awaited<ReturnType<typeof logoutBrowserSession>>, TError = ErrorType<void>>(
@@ -442,7 +443,7 @@ export const exchangeMobileAuthorizationCode = async (mobileTokenExchangeRequest
 
 
 
-export const getExchangeMobileAuthorizationCodeMutationOptions = <TError = ErrorType<unknown>,
+export const getExchangeMobileAuthorizationCodeMutationOptions = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext> => {
 
@@ -471,12 +472,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ExchangeMobileAuthorizationCodeMutationResult = NonNullable<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>>
     export type ExchangeMobileAuthorizationCodeMutationBody = BodyType<MobileTokenExchangeRequest>
-    export type ExchangeMobileAuthorizationCodeMutationError = ErrorType<unknown>
+    export type ExchangeMobileAuthorizationCodeMutationError = ErrorType<ErrorEnvelope>
 
     /**
  * @summary Exchange a mobile OIDC code for a session token
  */
-export const useExchangeMobileAuthorizationCode = <TError = ErrorType<unknown>,
+export const useExchangeMobileAuthorizationCode = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>, TError,{data: BodyType<MobileTokenExchangeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof exchangeMobileAuthorizationCode>>,

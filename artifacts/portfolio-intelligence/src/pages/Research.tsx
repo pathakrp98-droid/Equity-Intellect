@@ -33,6 +33,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useAppCapabilities } from "@/features/capabilities/api";
+import { aiAvailabilityCopy } from "@/features/capabilities/viewModel";
 import {
   useCreateCatalyst,
   useCreateInvalidation,
@@ -244,7 +246,12 @@ export function Research() {
         ?.toUpperCase() ?? null,
   );
   const [showAdd, setShowAdd] = useState(false);
-  const coverage = useAutomatedResearchCoverage(search);
+  const capabilities = useAppCapabilities();
+  const aiAvailability = aiAvailabilityCopy(capabilities.data);
+  const coverage = useAutomatedResearchCoverage(
+    search,
+    aiAvailability.available,
+  );
 
   function selectTicker(ticker: string) {
     setSelectedTicker(ticker);
@@ -287,14 +294,35 @@ export function Research() {
           </div>
           <h1 className="text-3xl font-bold tracking-tight">Research</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            AlphaDesk reviews every holding automatically and clearly separates
-            sourced facts from AI judgements.
+            Review saved evidence-backed research for every holding, with
+            sourced facts clearly separated from AI judgements.
           </p>
         </div>
         <Button onClick={() => setShowAdd((value) => !value)}>
           <Plus className="mr-2 h-4 w-4" /> Add company
         </Button>
       </div>
+
+      {aiAvailability.refreshDisabled ? (
+        <Card
+          className="border-amber-500/30 bg-amber-500/5"
+          role="status"
+        >
+          <CardContent className="flex items-start gap-3 p-4 sm:p-5">
+            <ShieldAlert
+              className="mt-0.5 h-5 w-5 shrink-0 text-amber-500"
+              aria-hidden="true"
+            />
+            <div>
+              <p className="font-medium">{aiAvailability.message}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Saved snapshots, evidence, identity correction and Your
+                research remain available. No paid AI request will be made.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {showAdd ? (
         <AddCompanyCard
@@ -313,6 +341,7 @@ export function Research() {
             coverage={coverage.data}
             isLoading={coverage.isLoading}
             search={search}
+            automationAvailable={aiAvailability.available}
             onSearch={setSearch}
             selectedTicker={selectedTicker}
             onSelect={selectTicker}
@@ -353,6 +382,7 @@ export function Research() {
                 <TabsContent value="alphadesk" className="mt-4">
                   <AutomatedResearchPanel
                     coverage={selected}
+                    automationAvailable={aiAvailability.available}
                     onIdentityCorrected={(ticker) => {
                       setSearch("");
                       selectTicker(ticker);

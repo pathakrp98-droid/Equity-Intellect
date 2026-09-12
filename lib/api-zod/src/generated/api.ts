@@ -22,7 +22,8 @@ export const GetCurrentAuthUserResponse = zod.object({
   "firstName": zod.string().nullable(),
   "lastName": zod.string().nullable(),
   "profileImageUrl": zod.string().nullable()
-}),zod.null()])
+}),zod.null()]),
+  "authProvider": zod.enum(['replit', 'google'])
 })
 
 
@@ -43,7 +44,7 @@ export const HandleBrowserLoginCallbackResponse = zod.void()
 
 
 /**
- * @summary Clear session and begin OIDC logout
+ * @summary Clear the application session
  */
 export const LogoutBrowserSessionHeader = zod.object({
   "Authorization": zod.string().optional().describe('Opaque session token — `Bearer <sid>`.')

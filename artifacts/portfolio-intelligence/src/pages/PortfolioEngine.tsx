@@ -94,7 +94,7 @@ export function PortfolioEngine() {
             <h1 className="text-2xl font-semibold">Portfolio Engine</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {unauthorized
-                ? "Sign in to create your private transaction ledger and portfolio."
+                ? "Sign in to manage your private holdings-first portfolio."
                 : errorMessage(overview.error)}
             </p>
           </div>

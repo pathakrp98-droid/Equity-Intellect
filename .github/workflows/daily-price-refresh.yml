@@ -1,0 +1,50 @@
+name: Daily portfolio price refresh
+
+on:
+  schedule:
+    - cron: "47 10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alphadesk-daily-price-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-prices:
+    # Scheduled runs remain disabled until the zero-payment checks in the
+    # deployment runbook pass and this repository variable is explicitly set.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_PRICE_REFRESH_SCHEDULE == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AI_REQUESTS_ENABLED: "false"
+      DATABASE_URL: ${{ secrets.ALPHADESK_DATABASE_URL }}
+      PRICE_REFRESH_CONCURRENCY: "2"
+    steps:
+      - name: Check out the reviewed branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the reviewed Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+
+      - name: Install the locked workspace
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Apply reviewed additive migrations
+        run: pnpm --filter @workspace/db migrate
+
+      - name: Build the reviewed application
+        run: pnpm run build
+
+      - name: Refresh active portfolio quotes once
+        run: pnpm --filter @workspace/api-server prices:run-once
