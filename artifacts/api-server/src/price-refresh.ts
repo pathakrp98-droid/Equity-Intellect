@@ -109,5 +109,11 @@ async function main() {
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  void main();
+  void main().catch(() => {
+    logger.error(
+      { errorCode: "scheduler_unavailable" },
+      "price refresh failed",
+    );
+    process.exitCode = 1;
+  });
 }
