@@ -70,14 +70,14 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
   with `running | fresh | partial | failed` status, safe diagnostics, worker,
   start/completion timestamps, and a user/day index.
 
-- [ ] Write schema/migration tests for columns, keys, checks, foreign keys,
+- [x] Write schema/migration tests for columns, keys, checks, foreign keys,
   indexes, and additive/idempotent SQL.
-- [ ] Run the schema test red because the schema and migration do not exist.
-- [ ] Add the Drizzle schema and reviewed additive migration. Use a PostgreSQL
+- [x] Run the schema test red because the schema and migration do not exist.
+- [x] Add the Drizzle schema and reviewed additive migration. Use a PostgreSQL
   `date` column for the Asia/Kolkata bucket and checks for nonblank lease/worker
   values and attempt numbers from 1 through 3.
-- [ ] Export the schema and run the focused schema test plus DB typecheck green.
-- [ ] Commit with `feat: add price refresh coordination schema`.
+- [x] Export the schema and run the focused schema test plus DB typecheck green.
+- [x] Commit with `feat: add price refresh coordination schema`.
 
 ### Task 2: Implement atomic lease and attempt coordination
 
@@ -101,16 +101,16 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
 - `completeAutomaticPriceAttempt(...)` restricted to the exact user, attempt,
   and worker.
 
-- [ ] Write tests over an injected query adapter for Kolkata date boundaries,
+- [x] Write tests over an injected query adapter for Kolkata date boundaries,
   dynamic active-user discovery, exact tenant predicates, concurrent conflict
   handling, current-lease rejection, expired takeover, exact-owner release,
   daily fresh suppression, cooldown, max attempts, and safe completion data.
-- [ ] Run the repository tests red.
-- [ ] Implement parameterized SQL; never interpolate user IDs, worker IDs,
+- [x] Run the repository tests red.
+- [x] Implement parameterized SQL; never interpolate user IDs, worker IDs,
   dates, or diagnostics. Return explicit claim/skip reasons without leaking
   provider or database payloads.
-- [ ] Run repository tests and API typecheck green.
-- [ ] Commit with `feat: coordinate automatic price refreshes`.
+- [x] Run repository tests and API typecheck green.
+- [x] Commit with `feat: coordinate automatic price refreshes`.
 
 ### Task 3: Add a quote-only refresh path and preserve manual prices
 
@@ -137,19 +137,19 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
 - `marketIntelligenceService.importNormalizedData` can disable research-trigger
   emission for quote-only scheduled imports.
 
-- [ ] Write policy tests proving quote-only mode never selects snapshot, news,
+- [x] Write policy tests proving quote-only mode never selects snapshot, news,
   calendar, or corporate actions; classifies complete fresh versus partial or
   failed results; ignores invalid/zero quote values; and protects only explicit
   manual overrides.
-- [ ] Run the policy tests red.
-- [ ] Refactor the existing refresh loop behind an all-capabilities/quotes-only
+- [x] Run the policy tests red.
+- [x] Refactor the existing refresh loop behind an all-capabilities/quotes-only
   mode without changing authenticated manual refresh defaults.
-- [ ] Make quote-only imports skip research-trigger emission and preserve
+- [x] Make quote-only imports skip research-trigger emission and preserve
   explicit manual prices. Retain stale fallback diagnostics and per-ticker
   missing-symbol reporting.
-- [ ] Run the policy, provider, normalization, portfolio, and API typecheck
+- [x] Run the policy, provider, normalization, portfolio, and API typecheck
   suites green.
-- [ ] Commit with `feat: add safe quote-only portfolio refresh`.
+- [x] Commit with `feat: add safe quote-only portfolio refresh`.
 
 ### Task 4: Run bounded automatic refreshes from pages and a finite CLI
 
@@ -179,18 +179,18 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
 - Compiled command:
   `artifacts/api-server/dist/price-refresh.mjs` and script `prices:run-once`.
 
-- [ ] Write scheduler tests for shared lock rejection, expired recovery via the
+- [x] Write scheduler tests for shared lock rejection, expired recovery via the
   repository contract, no holdings hardcoding, per-user isolation, bounded
   concurrency, attempt status, partial/missing ticker behavior, no retry after
   fresh, and release on errors.
-- [ ] Write entry-point tests for finite configuration bounds, nonzero fatal
+- [x] Write entry-point tests for finite configuration bounds, nonzero fatal
   exit behavior, safe logs, `AI_REQUESTS_ENABLED=false`, and pool shutdown.
-- [ ] Run scheduler/entry tests red.
-- [ ] Implement scheduler, runtime wiring, page-triggered `refreshDaily`
+- [x] Run scheduler/entry tests red.
+- [x] Implement scheduler, runtime wiring, page-triggered `refreshDaily`
   delegation, finite command, build entry, and package script.
-- [ ] Run all live-data, portfolio, route, scheduler, typecheck, and production
+- [x] Run all live-data, portfolio, route, scheduler, typecheck, and production
   build checks green.
-- [ ] Commit with `feat: schedule database-leased price refreshes`.
+- [x] Commit with `feat: schedule database-leased price refreshes`.
 
 ### Task 5: Add an initially disabled, zero-payment GitHub workflow
 
@@ -214,18 +214,18 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
   frozen install, reviewed migrations, ten-minute timeout, concurrency guard,
   database secret only, and AI explicitly disabled with no OpenAI secret.
 
-- [ ] Write a structural workflow verifier that rejects write permissions,
+- [x] Write a structural workflow verifier that rejects write permissions,
   unpinned actions, pull-request triggers, missing enable gate, non-weekday cron,
   absent timeout/concurrency, AI enablement, OpenAI secrets, or any Replit/paid
   cron dependency.
-- [ ] Run the workflow verifier red.
-- [ ] Add the disabled-by-default workflow and build/runtime configuration.
+- [x] Run the workflow verifier red.
+- [x] Add the disabled-by-default workflow and build/runtime configuration.
   Ensure reviewed migrations run before both web startup and the scheduler.
-- [ ] Extend the runbook with the free-allowance/no-overage check, exact manual
+- [x] Extend the runbook with the free-allowance/no-overage check, exact manual
   enable/disable steps, retry/status interpretation, secret scope, rollback,
   and the authenticated on-demand fallback. Do not claim the schedule is on.
-- [ ] Run the workflow verifier and configuration tests green.
-- [ ] Commit with `feat: prepare free daily price workflow`.
+- [x] Run the workflow verifier and configuration tests green.
+- [x] Commit with `feat: prepare free daily price workflow`.
 
 ### Task 6: Full regression and no-spend handoff
 
@@ -234,15 +234,32 @@ quote adapter, Node test runner, GitHub Actions, Render Free configuration.
 - Modify this plan by checking every completed step.
 - Modify documentation only if verification discovers an inaccurate command.
 
-- [ ] Run all DB, auth, live-data, portfolio, intelligence, Guardian, Morning
+- [x] Run all DB, auth, live-data, portfolio, intelligence, Guardian, Morning
   Brief, research, capabilities, frontend, typecheck, workflow, and production
   build tests with `AI_REQUESTS_ENABLED=false` and no OpenAI key.
-- [ ] Run `git diff --check`, inspect `git status`, and scan tracked/diff files
+- [x] Run `git diff --check`, inspect `git status`, and scan tracked/diff files
   for `.env`, database dumps, OAuth credentials, API keys, tokens, session
   secrets, and generated build artifacts.
-- [ ] Confirm the workflow is disabled by default, only quote code is reachable,
+- [x] Confirm the workflow is disabled by default, only quote code is reachable,
   manual refresh is unchanged, and no automatic path can call AI.
-- [ ] Commit verified plan checkmarks with
+- [x] Commit verified plan checkmarks with
   `docs: verify daily price refresh migration`.
-- [ ] Do not push, deploy, enable, create credentials, or upload/restore data.
+- [x] Do not push, deploy, enable, create credentials, or upload/restore data.
   Report the exact remaining approval-gated actions to the user.
+
+## Verification Record — 2026-09-12
+
+- All 320 TypeScript tests under `lib/` and `artifacts/` passed with
+  `AI_REQUESTS_ENABLED=false` and an empty `OPENAI_API_KEY`.
+- Both package-manager policy tests and all 10 workflow-policy tests passed.
+- The full workspace typecheck and production build passed. Vite emitted only
+  the three pre-existing UI source-map location warnings.
+- The built `price-refresh.mjs` command was probed without `DATABASE_URL`; it
+  exited nonzero and logged only `scheduler_unavailable`, without a stack or
+  environment value.
+- `git diff --check` passed. The changed-file and tracked-file scans found no
+  dump, generated build output, private key, OAuth credential, API token, or
+  session secret. `.env.example` contains placeholders only.
+- No live database was opened because no approved disposable or destination
+  database was provided. No workflow was dispatched or enabled, and nothing
+  was pushed or deployed.
