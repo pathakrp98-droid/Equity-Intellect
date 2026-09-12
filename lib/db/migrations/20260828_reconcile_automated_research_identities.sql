@@ -13,8 +13,8 @@ SELECT DISTINCT
   t.user_id,
   t.portfolio_id,
   NULL::varchar(30),
-  'portfolio_reconciled',
-  'queued',
+  'portfolio_reconciled'::research_automation_trigger,
+  'queued'::research_automation_status,
   concat('identity-reconcile-v1:', t.portfolio_id),
   110,
   jsonb_build_object(

@@ -73,6 +73,26 @@ function sqlEnumValues(name: string) {
 }
 
 describe("automated research persistence schema", () => {
+  it(
+    "executes the distinct identity-reconciliation insert against enum columns",
+    { skip: !process.env.DATABASE_URL },
+    async () => {
+      const { default: pg } = await import("pg");
+      const client = new pg.Client({
+        connectionString: process.env.DATABASE_URL,
+      });
+
+      await client.connect();
+      await client.query("begin");
+      try {
+        await client.query(identityReconciliationSql);
+      } finally {
+        await client.query("rollback");
+        await client.end();
+      }
+    },
+  );
+
   it("queues one idempotent identity reconciliation event per active portfolio", () => {
     assert.match(
       identityReconciliationSql,
