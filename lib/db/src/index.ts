@@ -1,6 +1,10 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
+import pg, { type PoolConfig } from "pg";
 import * as schema from "./schema";
+import {
+  createIpv4ResolvedSocket,
+  shouldUseProtocolDnsResolver,
+} from "./neonDns";
 
 const { Pool } = pg;
 
@@ -10,7 +14,14 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const connectionString = process.env.DATABASE_URL;
+const poolConfig: PoolConfig = { connectionString };
+
+if (shouldUseProtocolDnsResolver(connectionString)) {
+  poolConfig.stream = () => createIpv4ResolvedSocket();
+}
+
+export const pool = new Pool(poolConfig);
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
