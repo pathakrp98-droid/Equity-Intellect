@@ -41,6 +41,14 @@ const IDENTITY_SETUP_COOKIE = "identity_setup_sid";
 const TRANSIENT_COOKIES = ["code_verifier", "nonce", "state", "return_to"];
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
+type CallbackStage =
+  | "auth_config"
+  | "oidc_discovery"
+  | "token_exchange"
+  | "claim_validation"
+  | "identity_lookup"
+  | "session_creation";
+
 export interface AuthTokenSet {
   claims: Record<string, unknown> | null;
   accessToken: string;
@@ -365,8 +373,10 @@ export function createAuthRouter(
       return;
     }
 
+    let callbackStage: CallbackStage = "auth_config";
     try {
       const config = dependencies.getAuthConfig();
+      callbackStage = "oidc_discovery";
       const oidcConfig = await dependencies.getOidcConfig();
       const callbackUrl =
         config.provider === "google"
@@ -375,6 +385,7 @@ export function createAuthRouter(
       const currentUrl = new URL(callbackUrl);
       const incomingUrl = new URL(req.url, "https://callback.invalid");
       currentUrl.search = incomingUrl.search;
+      callbackStage = "token_exchange";
       const tokens = await dependencies.exchangeAuthorizationCode(
         oidcConfig,
         currentUrl,
@@ -386,6 +397,7 @@ export function createAuthRouter(
         },
       );
       clearTransientCookies(res);
+      callbackStage = "claim_validation";
       const claims = tokens.claims;
       if (!claims) throw new Error("Verified ID token contained no claims.");
       const returnTo = getSafeReturnTo(req.cookies?.return_to);
@@ -393,11 +405,13 @@ export function createAuthRouter(
       if (config.provider === "google") {
         const identity = getGoogleIdentity(claims);
         if (!identity) throw new Error("Google identity claims were invalid.");
+        callbackStage = "identity_lookup";
         const user = await dependencies.findUserByExternalIdentity(
           identity.issuer,
           identity.subject,
         );
         if (!user) {
+          callbackStage = "session_creation";
           const setupSid = await dependencies.createSession(
             {
               kind: "google_identity_setup",
@@ -415,6 +429,7 @@ export function createAuthRouter(
           res.redirect("/api/auth/setup");
           return;
         }
+        callbackStage = "session_creation";
         const sid = await dependencies.createSession({
           kind: "google",
           user: toAuthUser(user),
@@ -425,6 +440,7 @@ export function createAuthRouter(
         return;
       }
 
+      callbackStage = "session_creation";
       const user = await dependencies.upsertReplitUser(claims);
       const expiresAt = getExpiresAt(dependencies.now(), tokens, claims);
       const sid = await dependencies.createSession({
@@ -438,7 +454,10 @@ export function createAuthRouter(
       res.redirect(returnTo);
     } catch (error) {
       clearTransientCookies(res);
-      req.log?.error(getSafeErrorMetadata(error), "OIDC callback error");
+      req.log?.error(
+        { ...getSafeErrorMetadata(error), callbackStage },
+        "OIDC callback error",
+      );
       res.redirect("/api/auth/error?reason=callback_failed");
     }
   });

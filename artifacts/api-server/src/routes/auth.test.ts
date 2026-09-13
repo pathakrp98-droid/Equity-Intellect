@@ -41,6 +41,11 @@ interface RecordedSession {
   ttlMs: number | undefined;
 }
 
+interface RecordedErrorLog {
+  metadata: Record<string, unknown>;
+  message: string;
+}
+
 function dependencies(
   config: AuthRuntimeConfig,
   overrides: Partial<AuthRouterDependencies> = {},
@@ -134,10 +139,21 @@ function dependencies(
 async function withServer<T>(
   router: IRouter,
   operation: (baseUrl: string) => Promise<T>,
+  errorLogs?: RecordedErrorLog[],
 ): Promise<T> {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  if (errorLogs) {
+    app.use((req, _res, next) => {
+      req.log = {
+        error(metadata: Record<string, unknown>, message: string) {
+          errorLogs.push({ metadata, message });
+        },
+      } as unknown as typeof req.log;
+      next();
+    });
+  }
   app.use(router);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => {
@@ -325,6 +341,55 @@ describe("provider-aware authentication routes", () => {
       }
       assert.doesNotMatch(cookies, /raw provider token error/);
     });
+  });
+
+  it("logs the safe callback stage when token exchange fails", async () => {
+    const errorLogs: RecordedErrorLog[] = [];
+    const deps = dependencies(googleConfig, {
+      async exchangeAuthorizationCode() {
+        throw new Error("sensitive provider detail");
+      },
+    });
+
+    await withServer(
+      createAuthRouter(deps),
+      async (baseUrl) => {
+        await fetch(`${baseUrl}/callback?code=verified&state=test-state`, {
+          redirect: "manual",
+          headers: { Cookie: transientCookieHeader() },
+        });
+      },
+      errorLogs,
+    );
+
+    assert.equal(errorLogs.length, 1);
+    assert.equal(errorLogs[0]?.message, "OIDC callback error");
+    assert.equal(errorLogs[0]?.metadata.callbackStage, "token_exchange");
+    assert.doesNotMatch(JSON.stringify(errorLogs), /sensitive provider detail/);
+  });
+
+  it("logs the safe callback stage when identity lookup fails", async () => {
+    const errorLogs: RecordedErrorLog[] = [];
+    const deps = dependencies(googleConfig, {
+      async findUserByExternalIdentity() {
+        throw new Error("sensitive database detail");
+      },
+    });
+
+    await withServer(
+      createAuthRouter(deps),
+      async (baseUrl) => {
+        await fetch(`${baseUrl}/callback?code=verified&state=test-state`, {
+          redirect: "manual",
+          headers: { Cookie: transientCookieHeader() },
+        });
+      },
+      errorLogs,
+    );
+
+    assert.equal(errorLogs.length, 1);
+    assert.equal(errorLogs[0]?.metadata.callbackStage, "identity_lookup");
+    assert.doesNotMatch(JSON.stringify(errorLogs), /sensitive database detail/);
   });
 
   it("logs Google out locally and rejects native exchange before OIDC", async () => {
