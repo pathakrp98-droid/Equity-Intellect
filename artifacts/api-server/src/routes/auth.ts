@@ -40,6 +40,7 @@ const IDENTITY_SETUP_TTL = 10 * 60 * 1_000;
 const IDENTITY_SETUP_COOKIE = "identity_setup_sid";
 const TRANSIENT_COOKIES = ["code_verifier", "nonce", "state", "return_to"];
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+const SAFE_ERROR_CODE = /^[A-Za-z0-9_:-]{1,64}$/;
 
 type CallbackStage =
   | "auth_config"
@@ -159,9 +160,18 @@ function getSafeErrorMetadata(error: unknown) {
   const causeStatus = isRecord(error.cause)
     ? getErrorStatus(error.cause)
     : undefined;
+  const directCode = error.code;
+  const causeCode = isRecord(error.cause) ? error.cause.code : undefined;
+  const candidateCode =
+    typeof directCode === "string" ? directCode : causeCode;
+  const errorCode =
+    typeof candidateCode === "string" && SAFE_ERROR_CODE.test(candidateCode)
+      ? candidateCode
+      : undefined;
   return {
     errorName: error instanceof Error ? error.name : "Error",
     errorStatus: errorStatus ?? causeStatus,
+    ...(errorCode ? { errorCode } : {}),
   };
 }
 
