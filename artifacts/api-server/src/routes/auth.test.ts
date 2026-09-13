@@ -372,7 +372,9 @@ describe("provider-aware authentication routes", () => {
     const errorLogs: RecordedErrorLog[] = [];
     const deps = dependencies(googleConfig, {
       async findUserByExternalIdentity() {
-        throw new Error("sensitive database detail");
+        throw Object.assign(new Error("sensitive database detail"), {
+          code: "42P01",
+        });
       },
     });
 
@@ -389,6 +391,7 @@ describe("provider-aware authentication routes", () => {
 
     assert.equal(errorLogs.length, 1);
     assert.equal(errorLogs[0]?.metadata.callbackStage, "identity_lookup");
+    assert.equal(errorLogs[0]?.metadata.errorCode, "42P01");
     assert.doesNotMatch(JSON.stringify(errorLogs), /sensitive database detail/);
   });
 
