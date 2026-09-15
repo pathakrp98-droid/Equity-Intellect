@@ -53,7 +53,7 @@ test("protocol DNS lookup preserves resolver failures", async () => {
   const resolve4: Resolve4 = (_hostname, callback) => {
     callback(expected, undefined);
   };
-  const lookup = createIpv4DnsLookup(resolve4);
+  const lookup = createIpv4DnsLookup(resolve4, resolve4);
 
   const error = await new Promise<NodeJS.ErrnoException>((resolve) => {
     lookup("database.example", { all: false }, (lookupError) => {
@@ -63,6 +63,55 @@ test("protocol DNS lookup preserves resolver failures", async () => {
   });
 
   assert.equal(error, expected);
+});
+
+test("protocol DNS lookup retries with the fallback resolver", async () => {
+  const primaryError = Object.assign(new Error("DNS name rejected"), {
+    code: "EBADNAME",
+  });
+  const primary: Resolve4 = (_hostname, callback) => {
+    callback(primaryError, undefined);
+  };
+  const fallback: Resolve4 = (_hostname, callback) => {
+    callback(null, ["203.0.113.30"]);
+  };
+
+  const lookup = createIpv4DnsLookup(primary, fallback);
+  const result = await new Promise<{ address: unknown; family: unknown }>(
+    (resolve, reject) => {
+      lookup("database.example", { all: false }, (error, address, family) => {
+        if (error) reject(error);
+        else resolve({ address, family });
+      });
+    },
+  );
+
+  assert.deepEqual(result, { address: "203.0.113.30", family: 4 });
+});
+
+test("protocol DNS lookup preserves non-EBADNAME failures", async () => {
+  const primaryError = Object.assign(new Error("DNS service unavailable"), {
+    code: "ESERVFAIL",
+  });
+  const primary: Resolve4 = (_hostname, callback) => {
+    callback(primaryError, undefined);
+  };
+  let fallbackCalls = 0;
+  const fallback: Resolve4 = (_hostname, callback) => {
+    fallbackCalls += 1;
+    callback(null, ["203.0.113.40"]);
+  };
+
+  const lookup = createIpv4DnsLookup(primary, fallback);
+  const error = await new Promise<NodeJS.ErrnoException>((resolve) => {
+    lookup("database.example", { all: false }, (lookupError) => {
+      assert.ok(lookupError);
+      resolve(lookupError);
+    });
+  });
+
+  assert.equal(error, primaryError);
+  assert.equal(fallbackCalls, 0);
 });
 
 test("custom database socket uses the supplied protocol DNS lookup", async () => {
