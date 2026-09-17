@@ -114,6 +114,54 @@ test("protocol DNS lookup preserves non-EBADNAME failures", async () => {
   assert.equal(fallbackCalls, 0);
 });
 
+test("default fallback tries a second HTTPS resolver after an HTTP failure", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedHosts: string[] = [];
+  globalThis.fetch = (async (input) => {
+    const endpoint = input instanceof URL ? input : new URL(String(input));
+    requestedHosts.push(endpoint.hostname);
+
+    if (requestedHosts.length === 1) {
+      return new Response("Service unavailable", { status: 503 });
+    }
+
+    return new Response(
+      JSON.stringify({
+        Status: 0,
+        Answer: [
+          { name: "database.example", type: 5, data: "alias.example" },
+          { name: "alias.example", type: 1, data: "203.0.113.50" },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  const primary: Resolve4 = (_hostname, callback) => {
+    callback(
+      Object.assign(new Error("DNS name rejected"), { code: "EBADNAME" }),
+      undefined,
+    );
+  };
+
+  try {
+    const lookup = createIpv4DnsLookup(primary);
+    const result = await new Promise<{ address: unknown; family: unknown }>(
+      (resolve, reject) => {
+        lookup("database.example", { all: false }, (error, address, family) => {
+          if (error) reject(error);
+          else resolve({ address, family });
+        });
+      },
+    );
+
+    assert.deepEqual(result, { address: "203.0.113.50", family: 4 });
+    assert.deepEqual(requestedHosts, ["cloudflare-dns.com", "dns.google"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("custom database socket uses the supplied protocol DNS lookup", async () => {
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

@@ -18,38 +18,65 @@ type DnsJsonResponse = {
   Answer?: Array<{ type?: unknown; data?: unknown }>;
 };
 
+const dnsOverHttpsEndpoints = [
+  "https://cloudflare-dns.com/dns-query",
+  "https://dns.google/resolve",
+];
+
 async function resolveIpv4ViaDnsOverHttps(hostname: string): Promise<string[]> {
-  const endpoint = new URL("https://dns.google/resolve");
-  endpoint.searchParams.set("name", hostname);
-  endpoint.searchParams.set("type", "A");
+  let lastError: unknown;
 
-  const response = await fetch(endpoint, {
-    headers: { accept: "application/dns-json" },
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!response.ok) {
-    throw Object.assign(
-      new Error(`DNS-over-HTTPS returned HTTP ${response.status}.`),
-      { code: "EDNSHTTP" },
-    );
+  for (const endpointUrl of dnsOverHttpsEndpoints) {
+    try {
+      const endpoint = new URL(endpointUrl);
+      endpoint.searchParams.set("name", hostname);
+      endpoint.searchParams.set("type", "A");
+
+      const response = await fetch(endpoint, {
+        headers: { accept: "application/dns-json" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(`DNS-over-HTTPS returned HTTP ${response.status}.`),
+          { code: "EDNSHTTP" },
+        );
+      }
+
+      const result = (await response.json()) as DnsJsonResponse;
+      if (!result || typeof result !== "object") {
+        throw Object.assign(new Error("DNS-over-HTTPS returned invalid JSON."), {
+          code: "EDNSJSON",
+        });
+      }
+      if (result.Status !== 0) {
+        throw Object.assign(
+          new Error(`DNS-over-HTTPS returned status ${String(result.Status)}.`),
+          { code: "EDNSSTATUS" },
+        );
+      }
+
+      const addresses = (Array.isArray(result.Answer) ? result.Answer : [])
+        .filter(
+          (answer) =>
+            answer.type === 1 &&
+            typeof answer.data === "string" &&
+            isIPv4(answer.data),
+        )
+        .map((answer) => answer.data as string);
+      if (!addresses.length) {
+        throw noIpv4AddressError(hostname);
+      }
+
+      return addresses;
+    } catch (error: unknown) {
+      lastError = error;
+    }
   }
 
-  const result = (await response.json()) as DnsJsonResponse;
-  if (result.Status !== 0) {
-    throw Object.assign(
-      new Error(`DNS-over-HTTPS returned status ${String(result.Status)}.`),
-      { code: "EDNSSTATUS" },
-    );
-  }
-
-  return (Array.isArray(result.Answer) ? result.Answer : [])
-    .filter(
-      (answer) =>
-        answer.type === 1 &&
-        typeof answer.data === "string" &&
-        isIPv4(answer.data),
-    )
-    .map((answer) => answer.data as string);
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("DNS-over-HTTPS lookup failed.");
 }
 
 const dnsOverHttpsResolve4: Resolve4 = (hostname, callback) => {
