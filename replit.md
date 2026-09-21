@@ -1,6 +1,6 @@
-# [Project name]
+# AlphaDesk
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+AlphaDesk is a holdings-first portfolio monitor for a layperson, tracking NSE/BSE positions and building evidence-first equity research alongside Guardian risk alerts, Morning Brief, and System Health.
 
 ## Run & Operate
 
