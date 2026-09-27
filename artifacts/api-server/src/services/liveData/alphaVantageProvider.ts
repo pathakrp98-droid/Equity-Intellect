@@ -122,6 +122,8 @@ export class AlphaVantageProvider implements LiveDataProvider {
   async fetchQuotes(
     context: LiveDataProviderContext,
   ): Promise<MarketPointInput[]> {
+    if (context.symbols.length === 0) return [];
+
     const pointsByIndex: Array<MarketPointInput | null> = context.symbols.map(
       () => null,
     );

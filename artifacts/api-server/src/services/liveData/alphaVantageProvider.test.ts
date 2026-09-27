@@ -89,3 +89,12 @@ test("quote fetching uses bounded symbol concurrency", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("fetchQuotes returns empty results instead of throwing when there are no symbols to check", async () => {
+  const provider = new AlphaVantageProvider();
+  const quotes = await provider.fetchQuotes!({
+    symbols: [],
+    now: new Date("2026-07-19T00:00:00Z"),
+  });
+  assert.deepEqual(quotes, []);
+});
