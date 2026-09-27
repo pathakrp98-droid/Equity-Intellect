@@ -1,6 +1,7 @@
 import type { MarketImportPayload } from "../intelligence/types";
 import { marketIntelligenceProvider } from "../intelligence/httpProvider";
 import { alphaVantageProvider } from "./alphaVantageProvider";
+import { nseBhavcopyProvider } from "./nseBhavcopyProvider";
 import type {
   LiveDataProvider,
   LiveDataProviderContext,
@@ -35,6 +36,7 @@ class NormalizedHttpProviderAdapter implements LiveDataProvider {
 const providers: LiveDataProvider[] = [
   new NormalizedHttpProviderAdapter(),
   alphaVantageProvider,
+  nseBhavcopyProvider,
 ];
 
 export function listLiveDataProviders(): LiveDataProvider[] {

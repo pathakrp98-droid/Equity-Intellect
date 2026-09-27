@@ -8,9 +8,17 @@ import { Upload, FileUp, Database, AlertCircle, CheckCircle2, Server } from 'luc
 import { formatCurrency } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useLiveDataStatus } from '@/features/liveData/api';
+
+const PROVIDER_DISPLAY: Record<string, { name: string; type: string }> = {
+  'alpha-vantage': { name: 'Yahoo Finance', type: 'Equity Quotes (intraday-ish)' },
+  'nse-bhavcopy': { name: 'NSE India (Bhavcopy)', type: 'Official EOD Prices + Indices' },
+  'normalized-http': { name: 'Custom Normalized Feed', type: 'Self-hosted (MARKET_INTELLIGENCE_URL)' },
+};
 
 export function Settings() {
   const { data: brokers } = useGetBrokerSnapshots();
+  const { data: liveDataStatus, isLoading: liveDataLoading } = useLiveDataStatus();
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -18,19 +26,6 @@ export function Settings() {
         <h1 className="text-3xl font-bold tracking-tight">Platform Settings</h1>
         <p className="text-muted-foreground text-sm mt-1">Manage data sources, API integrations, and system preferences.</p>
       </div>
-
-      <Card className="border-amber-500/30 bg-amber-500/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg text-amber-500 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5" /> Demo Mode Active
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-amber-500/80 mb-4">
-            You are currently viewing simulated portfolio data. To view your actual portfolio analytics, please import your holdings from your broker.
-          </p>
-        </CardContent>
-      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
@@ -66,15 +61,23 @@ export function Settings() {
             <Database className="w-4 h-4 text-primary" />
             Connected Data Sources
           </CardTitle>
-          <CardDescription>Market data and fundamental research APIs</CardDescription>
+          <CardDescription>Live-data providers actually registered in this deployment (see Live Data for detail)</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <DataSourceRow name="NSE Real-time Feed" status="connected" lastSync="Live" type="Price Data" />
-            <DataSourceRow name="BSE Corporate Announcements" status="connected" lastSync="2 mins ago" type="Filings" />
-            <DataSourceRow name="Fundamental DB (Capitaline)" status="connected" lastSync="12 hrs ago" type="Financials" />
-            <DataSourceRow name="F&O Positioning Data" status="connected" lastSync="Live" type="Derivatives" />
-            <DataSourceRow name="Brokerage Research Feed" status="connected" lastSync="1 hr ago" type="Analyst Notes" />
+            {liveDataLoading && <p className="text-sm text-muted-foreground">Loading provider status…</p>}
+            {liveDataStatus?.providers.map((provider) => {
+              const display = PROVIDER_DISPLAY[provider.name] ?? { name: provider.name, type: 'Provider' };
+              return (
+                <DataSourceRow
+                  key={provider.name}
+                  name={display.name}
+                  status={provider.configured ? 'connected' : 'not configured'}
+                  lastSync={provider.configured ? provider.configurationHint : provider.configurationHint}
+                  type={display.type}
+                />
+              );
+            })}
           </div>
         </CardContent>
       </Card>
@@ -111,8 +114,9 @@ function ImportForm({ broker }: { broker: 'Zerodha' | 'HDFC' }) {
               toast({ title: "Import Failed", description: res.errors[0], variant: "destructive" });
             }
           },
-          onError: () => {
-            toast({ title: "Import Failed", description: "Network error during import.", variant: "destructive" });
+          onError: (error: any) => {
+            const description = error?.data?.message ?? error?.message ?? "Network error during import.";
+            toast({ title: "Import Failed", description, variant: "destructive" });
           }
         }
       );
@@ -151,9 +155,9 @@ function ImportForm({ broker }: { broker: 'Zerodha' | 'HDFC' }) {
 
 function DataSourceRow({ name, status, lastSync, type }: any) {
   return (
-    <div className="flex items-center justify-between p-3 border rounded-lg bg-secondary/5">
+    <div className="flex items-center justify-between gap-4 p-3 border rounded-lg bg-secondary/5">
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded bg-background border flex items-center justify-center">
+        <div className="w-10 h-10 shrink-0 rounded bg-background border flex items-center justify-center">
           <Server className="w-5 h-5 text-muted-foreground" />
         </div>
         <div>
@@ -161,12 +165,12 @@ function DataSourceRow({ name, status, lastSync, type }: any) {
           <p className="text-xs text-muted-foreground">{type}</p>
         </div>
       </div>
-      <div className="text-right">
+      <div className="text-right max-w-xs">
         <div className="flex items-center justify-end gap-1.5 mb-1">
           <div className={cn("w-2 h-2 rounded-full", status === 'connected' ? "bg-emerald-500" : "bg-destructive")} />
           <span className="text-xs uppercase font-bold tracking-wider">{status}</span>
         </div>
-        <p className="text-xs text-muted-foreground font-mono">Sync: {lastSync}</p>
+        <p className="text-xs text-muted-foreground">{lastSync}</p>
       </div>
     </div>
   );
